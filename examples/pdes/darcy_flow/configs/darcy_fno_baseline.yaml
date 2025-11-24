@@ -1,0 +1,50 @@
+# Configuration for Darcy Flow with FNO
+
+# Model
+model: fno
+fno_modes: 8
+fno_width: 32
+in_channels: 3
+out_channels: 1
+
+# Data
+dataset: darcy
+data_dir: examples/pdes/darcy_flow/data
+base_res: 241
+override_res: 241
+total_samples: 1024
+c2f_resolutions: [30, 60, 120, 241]
+normalize: true
+add_coords: true
+use_grads: false
+
+# Training
+batch_size: 20
+epochs: 2
+optimizer: adam
+lr: 0.001
+loss_type: lp
+loss_reduction: mean
+device: gpu
+seed: 42
+
+# Scheduler
+use_scheduler: true
+weight_decay: 0.0001
+step_size: 100
+gamma: 0.5
+
+# GPU/Memory
+load_in_memory: true
+load_gpu_epoch: false
+pin_memory: false
+gradient_accumulation_steps: 1
+
+# Logging
+use_wandb: false
+project_name: mlmc_optim
+eval_every: 5
+save_checkpoint: false
+save_model: false
+
+

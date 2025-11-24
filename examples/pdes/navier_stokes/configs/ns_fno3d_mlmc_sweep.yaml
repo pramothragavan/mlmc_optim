@@ -1,0 +1,112 @@
+program: examples/examples_src/train_mlmc.py
+method: grid
+parameters:
+  # Experiment tracking
+  wandb_exp_idx:
+    values: [0]
+
+  # Data parameters
+  data_dir:
+    value: examples/pdes/navier_stokes/data
+  dataset:
+    value: navier_stokes
+  normalize:
+    value: true
+  base_res:
+    value: 64
+  override_res:
+    value: 64
+  total_samples:
+    value: 3000
+  c2f_resolutions:
+    value: [8, 16, 32, 64]
+  add_coords:
+    value: true
+  T_in:
+    value: 10
+  T:
+    value: 40
+  
+  # Model parameters
+  model:
+    value: fno3d
+  fno_modes:
+    value: 8
+  fno_width:
+    value: 20
+  in_channels:
+    value: 13
+  out_channels:
+    value: 1
+  
+  # Training parameters
+  epochs:
+    value: 500
+  lr:
+    values: 0.01
+  loss_type:
+    value: lp
+  loss_reduction:
+    value: sum
+  device:
+    value: gpu
+  eval_every:
+    value: 5
+  eval_plot_every:
+    value: 20
+  batch_size:
+    value: 10
+  optimizer:
+    value: adam
+  weight_decay:
+    value: 0.0001
+  use_scheduler:
+    value: true
+  step_size:
+    value: 100
+  gamma:
+    value: 0.5
+  gradient_accumulation_steps:
+    value: 1
+  seed:
+    value: 42
+
+  # MLMC parameters
+  mlmc_pairing:
+    values: [hierarchy]
+  mlmc_hierarchy_cache:
+    values: [true]
+  mlmc_batch_style:
+    value: geom_prog_batch
+  mlmc_sampling_style:
+    value: geom_prog
+  mlmc_both_multiplier:
+    values: [1, 2]
+  mlmc_max_level:
+    values: [2, 3]
+
+  # GPU/Memory
+  load_in_memory:
+    value: true
+  load_gpu:
+    value: true
+  load_gpu_epoch:
+    value: false
+  pin_memory:
+    value: false
+  # Logging
+  save_model:
+    value: false
+  save_wandb_artifact:
+    value: false
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args}
+  - --use_wandb
+  - --wandb_sweep
+
+entity: mlmc-optim
+project: ns2d_fno3d_mlmc2

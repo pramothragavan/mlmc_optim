@@ -1,0 +1,107 @@
+program: examples/examples_src/train_mlmc.py
+method: grid
+parameters:
+  # Experiment tracking
+  wandb_exp_idx:
+    values: [0]
+
+  # Data parameters
+  data_dir:
+    value: examples/pdes/darcy_flow/data
+  dataset:
+    value: darcy
+  normalize:
+    value: true
+  base_res:
+    value: 241
+  total_samples:
+    value: 1024
+  c2f_resolutions:
+    value: [30, 120]
+  add_coords:
+    value: true
+  load_in_memory:
+    value: true
+  use_grads:
+    value: false
+  
+  # Model parameters
+  model:
+    value: fno
+  fno_width:
+    value: 32
+  fno_modes:
+    value: 8
+  in_channels:
+    value: 3
+  out_channels:
+    value: 1
+  
+  # Training parameters
+  epochs:
+    value: 500
+  lr:
+    values: [0.001]
+  loss_type:
+    value: lp
+  loss_reduction:
+    value: sum
+  device:
+    value: gpu
+  eval_every:
+    value: 10
+  seed:
+    value: 42
+  
+  # Optimizer/Scheduler
+  optimizer:
+    value: adam
+  use_scheduler:
+    value: true
+  weight_decay:
+    value: 0.0001
+  step_size:
+    value: 100
+  gamma:
+    value: 0.5
+  
+  # MLMC parameters
+  mlmc_pairing:
+    values: [hierarchy]
+  mlmc_hierarchy_cache:
+    values: [true]
+  batch_size:
+    value: 20
+  mlmc_batch_style:
+    value: geom_prog_batch
+  mlmc_sampling_style:
+    value: geom_prog
+  mlmc_both_multiplier:
+    values: [1, 1.5, 2, 4, 8]
+  mlmc_max_level:
+    values: [2]
+
+  # GPU/Memory
+  load_gpu_epoch:
+    value: false
+  pin_memory:
+    value: false
+  gradient_accumulation_steps:
+    value: 1
+  
+  # Logging
+  save_model:
+    value: false
+  save_wandb_artifact:
+    value: false
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args}
+  - --use_wandb
+  - --wandb_sweep
+
+entity: mlmc-optim
+project: darcy_fno_mlmc_cache_120

@@ -1,0 +1,73 @@
+[project]
+name = "mlmc_optim"
+version = "0.1.0"
+description = "Multi-Level Monte Carlo Optimization for Neural Operators"
+requires-python = ">=3.9,<3.13"
+authors = [
+  { name = "James Rowbottom", email = "jr908@cam.ac.uk" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["neural operators", "MLMC", "PDE", "deep learning", "scientific computing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+  # PyTorch 2.4.1 - Last version without MPS backward pass bugs
+  # Issue: https://github.com/pytorch/pytorch/issues/142344
+  # TODO: Upgrade to 2.6.0 when released
+  "torch==2.4.1",
+  "torchvision==0.19.1",
+  "torchaudio==2.4.1",
+  "numpy>=1.24.0",
+  "scipy",
+  "h5py>=3.4.0",
+  "matplotlib>=3.7.0",
+  "seaborn>=0.12.0",
+  "scikit-learn>=1.2.0",
+  "tqdm>=4.65.0",
+  "pyyaml",
+  "wandb",
+  "pytorch-lightning>=2.0.0",
+  "torch-geometric",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "black",
+  "isort",
+  "flake8",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["mlmc_optim"]
+
+[tool.setuptools.package-dir]
+mlmc_optim = "mlmc_optim"
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=mlmc_optim --cov-report=term-missing"

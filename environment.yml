@@ -1,0 +1,22 @@
+name: mlmc_not
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9,<3.13
+  - pytorch==2.4.1
+  - torchvision==0.19.1
+  - torchaudio==2.4.1
+  - numpy>=1.24.0
+  - scipy
+  - h5py>=3.4.0
+  - matplotlib>=3.7.0
+  - seaborn>=0.12.0
+  - scikit-learn>=1.2.0
+  - tqdm>=4.65.0
+  - pip
+  - pip:
+    - wandb
+    - pytorch-lightning>=2.0.0
+    - torch-geometric

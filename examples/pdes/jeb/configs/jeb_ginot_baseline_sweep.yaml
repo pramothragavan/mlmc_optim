@@ -1,0 +1,100 @@
+program: examples/examples_src/train.py
+method: grid
+
+parameters:
+  wandb_exp_idx:
+    values: [0]
+
+  data_dir:
+    value: examples/pdes/jeb/data
+  dataset:
+    value: jeb
+  normalize:
+    value: false
+  base_res:
+    value: 6
+  override_res:
+    value: 6
+
+  model:
+    value: ginot
+  ginot_in_dim:
+    value: 3
+  ginot_global_pooling:
+    value: true
+  ginot_latent_dim:
+    value: 64
+  ginot_embed_dim:
+    value: 64
+  ginot_num_layers:
+    value: 4
+  ginot_num_heads:
+    value: 4
+  ginot_padding_value:
+    value: -1000
+  ginot_dropout:
+    value: 0.0
+  ginot_cross_attn_layers:
+    value: 4
+  ginot_in_channels:
+    value: 3
+  ginot_out_channels:
+    value: 1
+  ginot_emd_version:
+    value: nerf
+  ginot_coarse_pc:
+    value: false
+
+  batch_size:
+    value: 32
+  epochs:
+    value: 400
+  lr:
+    values: [0.001, 0.0005]
+  optimizer:
+    value: adam
+  weight_decay:
+    value: 0.0001
+  loss_type:
+    value: ginot
+  loss_reduction:
+    value: mean
+  device:
+    value: cuda
+  seed:
+    value: 42
+  gradient_accumulation_steps:
+    value: 1
+
+  use_scheduler:
+    value: true
+  step_size:
+    value: 100
+  gamma:
+    value: 0.7
+
+  eval_every:
+    value: 10
+  eval_plot_every:
+    value: 50
+  eval_grad_every:
+    value: null
+  eval_grad_batches:
+    value: null
+  save_model:
+    value: false
+  save_wandb_artifact:
+    value: false
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - examples/pdes/jeb/configs/jeb_ginot_baseline.yaml
+  - ${args}
+  - --use_wandb
+  - --wandb_sweep
+
+entity: mlmc-optim
+project: jeb_ginot_baseline_new

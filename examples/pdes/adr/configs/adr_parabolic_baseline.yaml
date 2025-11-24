@@ -1,0 +1,54 @@
+# Configuration - ADR (Advection-Diffusion-Reaction) Example
+# ParabolicCNN for advection-diffusion-reaction equations
+
+# Model
+model: parabolic
+in_channels: 1
+out_channels: 1
+hidden_dim: 32
+layer_dims: [32, 32]
+max_pool: false
+operator_type: diagonal
+rank: 4
+advection: true
+
+# Data
+dataset: adr
+data_dir: examples/pdes/adr/data
+base_res: 300
+override_res: 300
+c2f_resolutions: [75, 150, 300]
+normalize: true
+add_coords: false
+use_grads: false
+
+# Training
+batch_size: 20
+epochs: 5
+optimizer: adam
+lr: 0.001
+loss_type: mse
+loss_reduction: mean
+device: gpu
+seed: 42
+
+# Scheduler
+use_scheduler: true
+weight_decay: 0.0001
+step_size: 100
+gamma: 0.5
+
+# GPU/Memory
+load_gpu: true
+load_in_memory: true
+load_gpu_epoch: false
+pin_memory: false
+gradient_accumulation_steps: 1
+
+# Logging
+use_wandb: false
+project_name: mlmc_optim
+eval_every: 5
+eval_grad_every: null
+save_checkpoint: false
+checkpoint_dir: ./checkpoints

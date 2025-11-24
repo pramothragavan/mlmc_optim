@@ -1,0 +1,54 @@
+# Baseline Configuration - FlowPastCylinder Example
+# GNN (MP_PDE) for flow past cylinder simulation
+
+# Model
+model: mp_pde
+L: 1.0
+tmax: 50
+dt: 0.25
+mp_pde_input_window: 30
+mp_pde_output_window: 20
+mp_pde_hidden_dim: 128
+mp_pde_layers: 6
+mp_pde_autoregressive: false
+mp_pde_eq_vars:
+  inlet: 1.0
+  sides: 1.0
+  obstacle: 0.0
+  outlet: 1.0
+
+# Data
+data_dir: examples/pdes/flow_past_cylinder/data
+dataset: FlowPastCylinder
+total_samples: 150
+c2f_resolutions: [4]
+base_res: 1
+normalize: false
+FPC_direct: false
+load_in_memory: true
+pin_memory: false
+
+# Training
+batch_size: 4
+epochs: 200
+lr: 0.001
+weight_decay: 0.0001
+optimizer: adam
+loss_type: mse
+loss_reduction: mean
+use_scheduler: true
+step_size: 100
+gamma: 0.5
+device: gpu
+seed: 42
+gradient_accumulation_steps: 1
+load_gpu: false
+load_gpu_epoch: false
+
+# Logging
+use_wandb: false
+project_name: mlmc_optim_fpc
+eval_every: 5
+eval_grad_every: null
+save_checkpoint: false
+checkpoint_dir: ./checkpoints

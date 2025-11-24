@@ -1,0 +1,17 @@
+# PyTorch 2.4.1 - Last version without MPS backward pass bugs
+# See: https://github.com/pytorch/pytorch/issues/142344
+# TODO: Upgrade to 2.6.0 when released (fixes MPS regression)
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+numpy>=1.24.0
+scipy
+h5py>=3.4.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scikit-learn>=1.2.0
+tqdm>=4.65.0
+pyyaml
+wandb
+pytorch-lightning>=2.0.0
+torch-geometric

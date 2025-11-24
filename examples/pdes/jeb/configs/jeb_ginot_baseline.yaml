@@ -1,0 +1,53 @@
+# Baseline Configuration - JEB (Jet Engine Bracket) Example
+# GINOT transformer for point cloud stress prediction
+
+# Model
+model: ginot
+ginot_in_dim: 3
+ginot_global_pooling: true
+ginot_latent_dim: 64
+ginot_embed_dim: 64
+ginot_num_layers: 4
+ginot_num_heads: 4
+ginot_padding_value: -1000
+ginot_dropout: 0.0
+ginot_cross_attn_layers: 4
+ginot_in_channels: 3
+ginot_out_channels: 1
+ginot_emd_version: nerf
+ginot_coarse_pc: false
+use_gradient_checkpointing: false
+
+# Data
+data_dir: examples/pdes/jeb/data
+dataset: jeb
+c2f_resolutions: [6]
+base_res: 6
+normalize: false
+load_in_memory: true
+pin_memory: false
+
+# Training
+batch_size: 8
+epochs: 400
+lr: 0.001
+weight_decay: 0.0001
+optimizer: adam
+loss_type: ginot
+loss_reduction: mean
+use_scheduler: true
+step_size: 100
+gamma: 0.7
+device: cpu
+seed: 42
+gradient_accumulation_steps: 1
+load_gpu: false
+load_gpu_epoch: false
+
+# Logging
+use_wandb: false
+project_name: mlmc_optim_jeb
+eval_every: 5
+eval_grad_every: null
+save_checkpoint: false
+checkpoint_dir: ./checkpoints

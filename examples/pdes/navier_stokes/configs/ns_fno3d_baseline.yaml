@@ -1,0 +1,46 @@
+# Configuration - Navier-Stokes Example with FNO3D
+
+# Model
+model: fno3d
+fno_modes: 8
+fno_width: 20
+in_channels: 13  # T_in (10) + coords (3)
+out_channels: 1
+
+# Data
+dataset: navier_stokes
+data_dir: examples/pdes/navier_stokes/data
+c2f_resolutions: [64]
+base_res: 64
+override_res: 64
+normalize: true
+add_coords: true
+load_in_memory: true
+pin_memory: false
+T_in: 10
+T: 40
+
+# Training
+batch_size: 10
+epochs: 300
+lr: 0.01
+weight_decay: 0.0001
+optimizer: adam
+loss_type: lp
+loss_reduction: mean
+use_scheduler: true
+step_size: 100
+gamma: 0.5
+device: cpu #mps
+seed: 42
+load_gpu: false
+load_gpu_epoch: false
+gradient_accumulation_steps: 1
+
+# Logging
+use_wandb: false
+project_name: mlmc_optim
+eval_every: 10
+eval_grad_every: null
+save_checkpoint: false
+checkpoint_dir: ./checkpoints
