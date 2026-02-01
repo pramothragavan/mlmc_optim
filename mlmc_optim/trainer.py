@@ -320,6 +320,7 @@ class MLMCTrainer:
 
             # Forward pass at fine resolution
             output_fine = model(data_batch[fine_res])
+            target_fine = targets[fine_res]
             if denorm_f is not None:
                 output_fine = denorm_f(output_fine)
                 target_fine = denorm_f(target_fine)
