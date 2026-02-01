@@ -315,27 +315,21 @@ class MLMCTrainer:
             # Time forward pass
             forward_start = time.time()
 
-            # Use fine-resolution denormalizer for both levels
-            if self.denormalizers:
-                denorm = self.denormalizers[fine_res]
-            else:
-                denorm = None
+            denorm_f = self.denormalizers.get(fine_res) if self.denormalizers else None
+            denorm_c = self.denormalizers.get(coarse_res) if self.denormalizers else None
 
             # Forward pass at fine resolution
             output_fine = model(data_batch[fine_res])
-            if denorm is not None:
-                output_fine = denorm(output_fine)
-                target_fine = denorm(targets[fine_res])
-            else:
-                target_fine = targets[fine_res]
+            if denorm_f is not None:
+                output_fine = denorm_f(output_fine)
+                target_fine = denorm_f(target_fine)
 
             # Forward pass at coarse resolution
             output_coarse = model(data_batch[coarse_res])
-            if denorm is not None:
-                output_coarse = denorm(output_coarse)
-                target_coarse = denorm(targets[coarse_res])
-            else:
-                target_coarse = targets[coarse_res]
+            target_coarse = targets[coarse_res]
+            if denorm_c is not None:
+                output_coarse = denorm_c(output_coarse)
+                target_coarse = denorm_c(target_coarse)
 
             # Compute losses using configured criterion
             loss_fine = self.criterion(output_fine, target_fine)
