@@ -333,7 +333,7 @@ def get_datasets(config, c2f_resolutions, device):
         )
     elif config['dataset'] == 'jeb':
         level_dir = os.path.join(config['data_dir'], "GEJetEngineBracket", f"level_{config['base_res']}")
-        test_datasets[res] = JEBDataset(
+        test_datasets[config['base_res']] = JEBDataset(
             config=config,
             root=os.path.join(level_dir, "test"),
             data_dir=config['data_dir'],
