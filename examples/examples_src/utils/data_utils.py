@@ -96,18 +96,16 @@ def compute_grad_regularity(data: np.ndarray, dx: float) -> Tuple[float, float]:
 
 
 def norm_darcy_dataset(dep_dataset, ctrl_dataset, use_grads=True):
-    dep_dataset[:][0][0] = encode(dep_dataset[:][0][0], ctrl_dataset.input_mean, ctrl_dataset.input_std)
-
+    dep_dataset.input_data = encode(dep_dataset.input_data, ctrl_dataset.input_mean, ctrl_dataset.input_std)
     if use_grads:
-        dep_dataset[:][0][1] = encode(dep_dataset[:][0][1], ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
-        dep_dataset[:][0][2] = encode(dep_dataset[:][0][2], ctrl_dataset.gradx_mean, ctrl_dataset.gradx_std)
-        dep_dataset[:][0][3] = encode(dep_dataset[:][0][3], ctrl_dataset.grady_mean, ctrl_dataset.grady_std)
-
-    dep_dataset[:][1][:] = encode(dep_dataset[:][1][:], ctrl_dataset.output_mean, ctrl_dataset.output_std)
+        dep_dataset.input_smooth = encode(dep_dataset.input_smooth, ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
+        dep_dataset.input_gradx  = encode(dep_dataset.input_gradx,  ctrl_dataset.gradx_mean,  ctrl_dataset.gradx_std)
+        dep_dataset.input_grady  = encode(dep_dataset.input_grady,  ctrl_dataset.grady_mean,  ctrl_dataset.grady_std)
+    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
 def norm_dataset(dep_dataset, ctrl_dataset):
-    dep_dataset[:][0][:] = encode(dep_dataset[:][0][:], ctrl_dataset.input_mean, ctrl_dataset.input_std)
-    dep_dataset[:][1][:] = encode(dep_dataset[:][1][:], ctrl_dataset.output_mean, ctrl_dataset.output_std)
+    dep_dataset.input_data  = encode(dep_dataset.input_data,  ctrl_dataset.input_mean,  ctrl_dataset.input_std)
+    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
 class MatReader:
     def __init__(self, file_path, to_torch=True, to_cuda=False, to_float=True):
