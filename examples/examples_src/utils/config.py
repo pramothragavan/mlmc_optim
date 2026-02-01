@@ -222,6 +222,19 @@ def parse_args():
     parser = _build_parser()
     return parser.parse_args()
 
+def _flatten_wandb_parameters(d: dict) -> dict:
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            if "value" in v:
+                out[k] = v["value"]
+            elif "values" in v:
+                out[k] = v["values"][0]
+            else:
+                out[k] = v
+        else:
+            out[k] = v
+    return out
 
 def get_config() -> Dict[str, Any]:
     """Get complete configuration with proper precedence.
@@ -254,7 +267,10 @@ def get_config() -> Dict[str, Any]:
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
         yaml_config = load_config(str(config_path))
-        config.update(yaml_config)
+        params = yaml_config.get("parameters", yaml_config)
+        if not args.wandb_sweep:            # manual run
+            params = _flatten_wandb_parameters(params)
+        config.update(params)
 
     # Finally override with explicitly-set CLI arguments
     for k, v in cli.items():
