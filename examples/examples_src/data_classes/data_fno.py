@@ -255,9 +255,10 @@ class MultiResolutionDataset(MLMCDataset):
                     self.input_grady[idx]
                 ], dim=0)
 
+                # x is (4, s, s)
                 if self.grid is not None:
-                    # print("loading data with gradients and grid")
-                    x = torch.stack([x[idx], self.grid[idx]], dim=0)
+                    grid = self.grid.squeeze(1) if self.grid.ndim == 4 else self.grid   # -> (2, s, s) ideally
+                    x = torch.cat([x, grid], dim=0)                                     # (6, s, s)
                 return x, self.output_data[idx]
             else:
                 if self.grid is None:
@@ -293,8 +294,10 @@ class MultiResolutionDataset(MLMCDataset):
                     data['Kcoeff_x'][idx],
                     data['Kcoeff_y'][idx]
                 ], dim=0)
+                # x is (4, s, s)
                 if self.grid is not None:
-                    x = torch.stack([x, self.grid.squeeze()], dim=0)
+                    grid = self.grid.squeeze(1) if self.grid.ndim == 4 else self.grid   # (2, s, s)
+                    x = torch.cat([x, grid], dim=0)                                     # (6, s, s)
             else:
                 if self.grid is None:
                     x = torch.stack([data['coeff'][idx]], dim=0)
@@ -328,7 +331,9 @@ class MultiResolutionDataset(MLMCDataset):
                         self._gpu_grady_cache[cache_indices]
                     ], dim=1).contiguous()
                     if self.grid is not None:
-                        grid_rep = self.grid.to(self._gpu_device).repeat(len(indices), 1, 1, 1)
+                        grid = self.grid.to(self._gpu_device)
+                        grid = grid.permute(1,0,2,3)            # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s)
                         x = torch.cat([x, grid_rep], dim=1).contiguous()
                     return x, self._gpu_output_cache[cache_indices].contiguous()
                 else:
@@ -349,9 +354,15 @@ class MultiResolutionDataset(MLMCDataset):
                     self.input_grady[indices]
                 ], dim=1)
 
+                # x is (B, 4, s, s)
                 if self.grid is not None:
-                    # Add grid information
-                    grid_rep = self.grid.repeat(len(indices), 1, 1, 1)
+                    # convert to (1, 2, s, s) then expand to (B, 2, s, s)
+                    grid = self.grid
+                    if grid.ndim == 4:                         # (2,1,s,s)
+                        grid = grid.permute(1,0,2,3)           # (1,2,s,s)
+                    else:                                      # (2,s,s)
+                        grid = grid.unsqueeze(0)               # (1,2,s,s)
+                    grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s) view
                     x = torch.cat([x, grid_rep], dim=1)
                 return x, self.output_data[indices]
             else:
@@ -370,12 +381,24 @@ class MultiResolutionDataset(MLMCDataset):
             # Load data from disk
             data = torch.load(self.data_path)
             if self.dataset == 'darcy':
-                x = torch.stack([
-                    data['coeff'][indices],
-                    data['Kcoeff'][indices],
-                    data['Kcoeff_x'][indices],
-                    data['Kcoeff_y'][indices]
-                ], dim=1)
+                if self.has_gradients and self.use_grads:
+                    x = torch.stack([
+                        data['coeff'][indices],
+                        data['Kcoeff'][indices],
+                        data['Kcoeff_x'][indices],
+                        data['Kcoeff_y'][indices]
+                    ], dim=1)  # (B, 4, s, s)
+                    if self.grid is not None:
+                        grid = self.grid
+                        grid = grid.permute(1, 0, 2, 3)  # (1,2,s,s) from (2,1,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s)
+                        x = torch.cat([x, grid_rep], dim=1)  # (B, 6, s, s)
+                else:
+                    x = data['coeff'][indices].unsqueeze(1)  # (B,1,s,s)
+                    if self.grid is not None:
+                        grid = self.grid.permute(1, 0, 2, 3)          # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)
+                        x = torch.cat([x, grid_rep], dim=1)           # (B,3,s,s)
                 return x, data['sol'][indices]
             elif self.dataset == 'adr':
                 return data['coeff'][indices], data['sol'][indices]
