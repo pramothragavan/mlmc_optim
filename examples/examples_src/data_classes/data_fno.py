@@ -140,7 +140,6 @@ class MultiResolutionDataset(MLMCDataset):
         prefix = 'train' if train else 'test'
         if config['dataset'] == 'darcy':
             self.data_path = os.path.join(data_dir, 'darcy2d', f'{prefix}_r{resolution}.pt')
-            self.has_gradients = True
         elif config['dataset'] == 'adr':
             self.data_path = os.path.join(data_dir, 'adr', f'{prefix}_r{resolution}.pt')
             self.has_gradients = False
@@ -149,6 +148,8 @@ class MultiResolutionDataset(MLMCDataset):
 
         # Load file once
         data = torch.load(self.data_path)
+        if config['dataset'] == 'darcy':
+            self.has_gradients = all(k in data for k in ["Kcoeff", "Kcoeff_x", "Kcoeff_y"])
         
         # Determine sample indices
         total_samples = len(data['coeff'])
