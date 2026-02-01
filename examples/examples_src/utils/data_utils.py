@@ -241,7 +241,7 @@ def get_datasets(config, c2f_resolutions, device):
                 config,
                 config['data_dir'],
                 res,
-                train=True,
+                train=False,
                 load_in_memory=config['load_in_memory'],
                 normalize=config['normalize'],
                 add_coords=add_coords,
