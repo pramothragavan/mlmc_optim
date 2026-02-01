@@ -616,20 +616,21 @@ class MLMCTrainer:
 
                 # Backward pass
                 backward_start = time.time()
+                accum = config['gradient_accumulation_steps']
+                if batch_idx % accum == 0:
+                    self.optimizer.zero_grad(set_to_none=True)
 
                 # Scale loss if gradient accumulation is used
-                scaled_batch_loss = total_batch_loss / config['gradient_accumulation_steps']
-
-                # Single backward pass on accumulated loss
-                self.model.zero_grad()
+                scaled_batch_loss = total_batch_loss / accum
                 scaled_batch_loss.backward()
 
                 timing_stats['ts_backward'] += time.time() - backward_start
 
                 # Take optimizer step after accumulating gradients
-                if (batch_idx + 1) % config['gradient_accumulation_steps'] == 0:
+                if (((batch_idx + 1) % accum == 0) or ((batch_idx + 1) == len(batches))):
                     # Standard single-optimizer step
                     self.optimizer.step()
+                    total_steps += 1
                     self.optimizer.zero_grad()
 
                 if batch_idx % 10 == 0:  # Update every 10 batches
