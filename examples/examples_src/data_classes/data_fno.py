@@ -315,33 +315,42 @@ class MultiResolutionDataset(MLMCDataset):
             indices = torch.tensor(indices)
 
         # Check if we have GPU cache and if requested indices are in cache
-        if hasattr(self, '_gpu_input_cache'):
-            cache_mask = torch.isin(indices, self._gpu_indices)
-            if cache_mask.all():
-                # All indices in cache - use GPU cache
-                cache_idx_map = {idx.item(): i for i, idx in enumerate(self._gpu_indices)}
-                cache_indices = torch.tensor([cache_idx_map[idx.item()] for idx in indices],
-                                             dtype=torch.long, device=self._gpu_device)
+        if hasattr(self, "_gpu_input_cache") and hasattr(self, "_gpu_indices_sorted"):
+            if not isinstance(indices, torch.Tensor):
+                indices = torch.tensor(indices, dtype=torch.long)
+            else:
+                indices = indices.to(dtype=torch.long)
 
+            idx = indices.to(self._gpu_device)
+
+            pos = torch.searchsorted(self._gpu_indices_sorted, idx)
+            n = self._gpu_indices_sorted.numel()
+            in_bounds = pos < n
+            in_cache = in_bounds & (self._gpu_indices_sorted[pos.clamp_max(n - 1)] == idx)
+
+            if in_cache.all():
                 if self.has_gradients and self.use_grads:
                     x = torch.stack([
-                        self._gpu_input_cache[cache_indices],
-                        self._gpu_smooth_cache[cache_indices],
-                        self._gpu_gradx_cache[cache_indices],
-                        self._gpu_grady_cache[cache_indices]
+                        self._gpu_input_cache[pos],
+                        self._gpu_smooth_cache[pos],
+                        self._gpu_gradx_cache[pos],
+                        self._gpu_grady_cache[pos],
                     ], dim=1).contiguous()
+
                     if self.grid is not None:
                         grid = self.grid.to(self._gpu_device)
                         grid = grid.permute(1,0,2,3)            # (1,2,s,s)
                         grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s)
                         x = torch.cat([x, grid_rep], dim=1).contiguous()
-                    return x, self._gpu_output_cache[cache_indices].contiguous()
+                    return x, self._gpu_output_cache[pos].contiguous()
                 else:
-                    x = self._gpu_input_cache[cache_indices].unsqueeze(1).contiguous()
+                    x = self._gpu_input_cache[pos].unsqueeze(1).contiguous()
                     if self.grid is not None:
-                        grid_rep = self.grid.to(self._gpu_device).permute(1, 0, 2, 3).repeat(len(indices), 1, 1, 1)
+                        grid = self.grid.to(self._gpu_device).permute(1, 0, 2, 3)  # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)
                         x = torch.cat([x, grid_rep], dim=1).contiguous()
-                    return x, self._gpu_output_cache[cache_indices].contiguous()
+
+                    return x, self._gpu_output_cache[pos].contiguous()
 
         # Fall back to CPU data
         if self.load_in_memory:

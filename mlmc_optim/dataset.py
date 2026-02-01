@@ -74,22 +74,23 @@ class MLMCDataset(Dataset, ABC):
         """
         # Convert to tensor if needed
         if not isinstance(indices, torch.Tensor):
-            indices = torch.tensor(indices)
+            indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            indices = indices.to(dtype=torch.long)
+
         
         # Check for GPU cache
-        if hasattr(self, '_gpu_input_cache'):
-            cache_mask = torch.isin(indices, self._gpu_indices)
-            if cache_mask.all():
-                # All indices in cache - use GPU cache
-                cache_idx_map = {idx.item(): i for i, idx in enumerate(self._gpu_indices)}
-                cache_indices = torch.tensor(
-                    [cache_idx_map[idx.item()] for idx in indices],
-                    dtype=torch.long,
-                    device=self._gpu_device
-                )
+        if hasattr(self, "_gpu_input_cache") and hasattr(self, "_gpu_indices_sorted"):
+            idx = indices.to(self._gpu_device)
+
+            pos = torch.searchsorted(self._gpu_indices_sorted, idx)
+            in_bounds = pos < self._gpu_indices_sorted.numel()
+            in_cache = in_bounds & (self._gpu_indices_sorted[pos.clamp_max(self._gpu_indices_sorted.numel() - 1)] == idx)
+
+            if in_cache.all():
                 return (
-                    self._gpu_input_cache[cache_indices].contiguous(),
-                    self._gpu_output_cache[cache_indices].contiguous()
+                    self._gpu_input_cache[pos].contiguous(),
+                    self._gpu_output_cache[pos].contiguous(),
                 )
         
         # Fallback: use __getitem__ for each index
@@ -144,15 +145,19 @@ class MLMCDataset(Dataset, ABC):
         
         # Convert to tensor if needed
         if not isinstance(indices, torch.Tensor):
-            indices = torch.tensor(indices)
+            indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            indices = indices.to(dtype=torch.long)
+
+        indices_cpu = indices.cpu()
+        sorted_idx, _ = torch.sort(indices_cpu)
         
         # Store cache metadata
-        self._gpu_indices = indices
         self._gpu_device = device
+        self._gpu_indices_sorted = sorted_idx.to(device)
         
-        # Clone on CPU first for contiguity, then move to GPU once
-        self._gpu_input_cache = self.input_data[indices].clone().to(device)
-        self._gpu_output_cache = self.output_data[indices].clone().to(device)
+        self._gpu_input_cache = self.input_data[sorted_idx].contiguous().to(device)
+        self._gpu_output_cache = self.output_data[sorted_idx].contiguous().to(device)
     
     def unload_from_gpu(self, indices: Optional[Union[List[int], torch.Tensor]] = None):
         """Free GPU memory by moving data back to CPU.
@@ -170,7 +175,7 @@ class MLMCDataset(Dataset, ABC):
         if hasattr(self, '_gpu_input_cache'):
             del self._gpu_input_cache
             del self._gpu_output_cache
-            del self._gpu_indices
+            del self._gpu_indices_sorted
             del self._gpu_device
 
 
