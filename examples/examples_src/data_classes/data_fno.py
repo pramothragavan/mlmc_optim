@@ -444,16 +444,22 @@ class MultiResolutionDataset(MLMCDataset):
         
         Extends parent to also cache gradient tensors for Darcy dataset.
         """
+        # Ensure tensor on CPU for consistent indexing
+        if not isinstance(indices, torch.Tensor):
+            indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            indices = indices.to(dtype=torch.long)
+
+        sorted_idx, _ = torch.sort(indices.cpu())
+
         # Call parent implementation for standard tensors
-        super().load_batch_indices_to_gpu(indices, device)
-        
+        super().load_batch_indices_to_gpu(sorted_idx, device)
+
         # Cache gradient tensors if present (Darcy-specific)
         if hasattr(self, 'input_smooth'):
-            if not isinstance(indices, torch.Tensor):
-                indices = torch.tensor(indices, dtype=torch.long)
-            self._gpu_smooth_cache = self.input_smooth[indices].clone().to(device)
-            self._gpu_gradx_cache = self.input_gradx[indices].clone().to(device)
-            self._gpu_grady_cache = self.input_grady[indices].clone().to(device)
+            self._gpu_smooth_cache = self.input_smooth[sorted_idx].contiguous().to(device)
+            self._gpu_gradx_cache  = self.input_gradx[sorted_idx].contiguous().to(device)
+            self._gpu_grady_cache  = self.input_grady[sorted_idx].contiguous().to(device)
 
     def unload_from_gpu(self, indices=None):
         """Clear GPU cache to free memory.
