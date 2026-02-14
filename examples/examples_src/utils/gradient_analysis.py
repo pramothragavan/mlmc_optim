@@ -235,8 +235,8 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             coarse_target = coarse_target.to(device)
             output_coarse = model(coarse_data)
             if config['normalize']:
-                output_coarse = decode(output_coarse, train_means[fine_res], train_stds[fine_res])
-                target_coarse = decode(coarse_target, train_means[fine_res], train_stds[fine_res])
+                output_coarse = decode(output_coarse, train_means[coarse_res], train_stds[coarse_res])
+                target_coarse = decode(coarse_target, train_means[coarse_res], train_stds[coarse_res])
             else:
                 target_coarse = coarse_target
 

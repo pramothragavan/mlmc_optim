@@ -96,18 +96,16 @@ def compute_grad_regularity(data: np.ndarray, dx: float) -> Tuple[float, float]:
 
 
 def norm_darcy_dataset(dep_dataset, ctrl_dataset, use_grads=True):
-    dep_dataset[:][0][0] = encode(dep_dataset[:][0][0], ctrl_dataset.input_mean, ctrl_dataset.input_std)
-
+    dep_dataset.input_data = encode(dep_dataset.input_data, ctrl_dataset.input_mean, ctrl_dataset.input_std)
     if use_grads:
-        dep_dataset[:][0][1] = encode(dep_dataset[:][0][1], ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
-        dep_dataset[:][0][2] = encode(dep_dataset[:][0][2], ctrl_dataset.gradx_mean, ctrl_dataset.gradx_std)
-        dep_dataset[:][0][3] = encode(dep_dataset[:][0][3], ctrl_dataset.grady_mean, ctrl_dataset.grady_std)
-
-    dep_dataset[:][1][:] = encode(dep_dataset[:][1][:], ctrl_dataset.output_mean, ctrl_dataset.output_std)
+        dep_dataset.input_smooth = encode(dep_dataset.input_smooth, ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
+        dep_dataset.input_gradx  = encode(dep_dataset.input_gradx,  ctrl_dataset.gradx_mean,  ctrl_dataset.gradx_std)
+        dep_dataset.input_grady  = encode(dep_dataset.input_grady,  ctrl_dataset.grady_mean,  ctrl_dataset.grady_std)
+    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
 def norm_dataset(dep_dataset, ctrl_dataset):
-    dep_dataset[:][0][:] = encode(dep_dataset[:][0][:], ctrl_dataset.input_mean, ctrl_dataset.input_std)
-    dep_dataset[:][1][:] = encode(dep_dataset[:][1][:], ctrl_dataset.output_mean, ctrl_dataset.output_std)
+    dep_dataset.input_data  = encode(dep_dataset.input_data,  ctrl_dataset.input_mean,  ctrl_dataset.input_std)
+    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
 class MatReader:
     def __init__(self, file_path, to_torch=True, to_cuda=False, to_float=True):
@@ -317,7 +315,7 @@ def get_datasets(config, c2f_resolutions, device):
             config,
             data_dir=config['data_dir'],
             resolution=config['base_res'],
-            train=True,
+            train=False,
             load_in_memory=config['load_in_memory'],
             normalize=config['normalize'],
             add_coords=add_coords,
@@ -335,7 +333,7 @@ def get_datasets(config, c2f_resolutions, device):
         )
     elif config['dataset'] == 'jeb':
         level_dir = os.path.join(config['data_dir'], "GEJetEngineBracket", f"level_{config['base_res']}")
-        test_datasets[res] = JEBDataset(
+        test_datasets[config['base_res']] = JEBDataset(
             config=config,
             root=os.path.join(level_dir, "test"),
             data_dir=config['data_dir'],

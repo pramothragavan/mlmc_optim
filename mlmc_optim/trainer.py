@@ -315,27 +315,22 @@ class MLMCTrainer:
             # Time forward pass
             forward_start = time.time()
 
-            # Use fine-resolution denormalizer for both levels
-            if self.denormalizers:
-                denorm = self.denormalizers[fine_res]
-            else:
-                denorm = None
+            denorm_f = self.denormalizers.get(fine_res) if self.denormalizers else None
+            denorm_c = self.denormalizers.get(coarse_res) if self.denormalizers else None
 
             # Forward pass at fine resolution
             output_fine = model(data_batch[fine_res])
-            if denorm is not None:
-                output_fine = denorm(output_fine)
-                target_fine = denorm(targets[fine_res])
-            else:
-                target_fine = targets[fine_res]
+            target_fine = targets[fine_res]
+            if denorm_f is not None:
+                output_fine = denorm_f(output_fine)
+                target_fine = denorm_f(target_fine)
 
             # Forward pass at coarse resolution
             output_coarse = model(data_batch[coarse_res])
-            if denorm is not None:
-                output_coarse = denorm(output_coarse)
-                target_coarse = denorm(targets[coarse_res])
-            else:
-                target_coarse = targets[coarse_res]
+            target_coarse = targets[coarse_res]
+            if denorm_c is not None:
+                output_coarse = denorm_c(output_coarse)
+                target_coarse = denorm_c(target_coarse)
 
             # Compute losses using configured criterion
             loss_fine = self.criterion(output_fine, target_fine)
@@ -616,20 +611,21 @@ class MLMCTrainer:
 
                 # Backward pass
                 backward_start = time.time()
+                accum = config['gradient_accumulation_steps']
+                if batch_idx % accum == 0:
+                    self.optimizer.zero_grad(set_to_none=True)
 
                 # Scale loss if gradient accumulation is used
-                scaled_batch_loss = total_batch_loss / config['gradient_accumulation_steps']
-
-                # Single backward pass on accumulated loss
-                self.model.zero_grad()
+                scaled_batch_loss = total_batch_loss / accum
                 scaled_batch_loss.backward()
 
                 timing_stats['ts_backward'] += time.time() - backward_start
 
                 # Take optimizer step after accumulating gradients
-                if (batch_idx + 1) % config['gradient_accumulation_steps'] == 0:
+                if (((batch_idx + 1) % accum == 0) or ((batch_idx + 1) == len(batches))):
                     # Standard single-optimizer step
                     self.optimizer.step()
+                    total_steps += 1
                     self.optimizer.zero_grad()
 
                 if batch_idx % 10 == 0:  # Update every 10 batches

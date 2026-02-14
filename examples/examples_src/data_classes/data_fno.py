@@ -140,7 +140,6 @@ class MultiResolutionDataset(MLMCDataset):
         prefix = 'train' if train else 'test'
         if config['dataset'] == 'darcy':
             self.data_path = os.path.join(data_dir, 'darcy2d', f'{prefix}_r{resolution}.pt')
-            self.has_gradients = True
         elif config['dataset'] == 'adr':
             self.data_path = os.path.join(data_dir, 'adr', f'{prefix}_r{resolution}.pt')
             self.has_gradients = False
@@ -149,6 +148,8 @@ class MultiResolutionDataset(MLMCDataset):
 
         # Load file once
         data = torch.load(self.data_path)
+        if config['dataset'] == 'darcy':
+            self.has_gradients = all(k in data for k in ["Kcoeff", "Kcoeff_x", "Kcoeff_y"])
         
         # Determine sample indices
         total_samples = len(data['coeff'])
@@ -255,9 +256,10 @@ class MultiResolutionDataset(MLMCDataset):
                     self.input_grady[idx]
                 ], dim=0)
 
+                # x is (4, s, s)
                 if self.grid is not None:
-                    # print("loading data with gradients and grid")
-                    x = torch.stack([x[idx], self.grid[idx]], dim=0)
+                    grid = self.grid.squeeze(1) if self.grid.ndim == 4 else self.grid   # -> (2, s, s) ideally
+                    x = torch.cat([x, grid], dim=0)                                     # (6, s, s)
                 return x, self.output_data[idx]
             else:
                 if self.grid is None:
@@ -293,8 +295,10 @@ class MultiResolutionDataset(MLMCDataset):
                     data['Kcoeff_x'][idx],
                     data['Kcoeff_y'][idx]
                 ], dim=0)
+                # x is (4, s, s)
                 if self.grid is not None:
-                    x = torch.stack([x, self.grid.squeeze()], dim=0)
+                    grid = self.grid.squeeze(1) if self.grid.ndim == 4 else self.grid   # (2, s, s)
+                    x = torch.cat([x, grid], dim=0)                                     # (6, s, s)
             else:
                 if self.grid is None:
                     x = torch.stack([data['coeff'][idx]], dim=0)
@@ -312,31 +316,42 @@ class MultiResolutionDataset(MLMCDataset):
             indices = torch.tensor(indices)
 
         # Check if we have GPU cache and if requested indices are in cache
-        if hasattr(self, '_gpu_input_cache'):
-            cache_mask = torch.isin(indices, self._gpu_indices)
-            if cache_mask.all():
-                # All indices in cache - use GPU cache
-                cache_idx_map = {idx.item(): i for i, idx in enumerate(self._gpu_indices)}
-                cache_indices = torch.tensor([cache_idx_map[idx.item()] for idx in indices],
-                                             dtype=torch.long, device=self._gpu_device)
+        if hasattr(self, "_gpu_input_cache") and hasattr(self, "_gpu_indices_sorted"):
+            if not isinstance(indices, torch.Tensor):
+                indices = torch.tensor(indices, dtype=torch.long)
+            else:
+                indices = indices.to(dtype=torch.long)
 
+            idx = indices.to(self._gpu_device)
+
+            pos = torch.searchsorted(self._gpu_indices_sorted, idx)
+            n = self._gpu_indices_sorted.numel()
+            in_bounds = pos < n
+            in_cache = in_bounds & (self._gpu_indices_sorted[pos.clamp_max(n - 1)] == idx)
+
+            if in_cache.all():
                 if self.has_gradients and self.use_grads:
                     x = torch.stack([
-                        self._gpu_input_cache[cache_indices],
-                        self._gpu_smooth_cache[cache_indices],
-                        self._gpu_gradx_cache[cache_indices],
-                        self._gpu_grady_cache[cache_indices]
+                        self._gpu_input_cache[pos],
+                        self._gpu_smooth_cache[pos],
+                        self._gpu_gradx_cache[pos],
+                        self._gpu_grady_cache[pos],
                     ], dim=1).contiguous()
+
                     if self.grid is not None:
-                        grid_rep = self.grid.to(self._gpu_device).repeat(len(indices), 1, 1, 1)
+                        grid = self.grid.to(self._gpu_device)
+                        grid = grid.permute(1,0,2,3)            # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s)
                         x = torch.cat([x, grid_rep], dim=1).contiguous()
-                    return x, self._gpu_output_cache[cache_indices].contiguous()
+                    return x, self._gpu_output_cache[pos].contiguous()
                 else:
-                    x = self._gpu_input_cache[cache_indices].unsqueeze(1).contiguous()
+                    x = self._gpu_input_cache[pos].unsqueeze(1).contiguous()
                     if self.grid is not None:
-                        grid_rep = self.grid.to(self._gpu_device).permute(1, 0, 2, 3).repeat(len(indices), 1, 1, 1)
+                        grid = self.grid.to(self._gpu_device).permute(1, 0, 2, 3)  # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)
                         x = torch.cat([x, grid_rep], dim=1).contiguous()
-                    return x, self._gpu_output_cache[cache_indices].contiguous()
+
+                    return x, self._gpu_output_cache[pos].contiguous()
 
         # Fall back to CPU data
         if self.load_in_memory:
@@ -349,9 +364,15 @@ class MultiResolutionDataset(MLMCDataset):
                     self.input_grady[indices]
                 ], dim=1)
 
+                # x is (B, 4, s, s)
                 if self.grid is not None:
-                    # Add grid information
-                    grid_rep = self.grid.repeat(len(indices), 1, 1, 1)
+                    # convert to (1, 2, s, s) then expand to (B, 2, s, s)
+                    grid = self.grid
+                    if grid.ndim == 4:                         # (2,1,s,s)
+                        grid = grid.permute(1,0,2,3)           # (1,2,s,s)
+                    else:                                      # (2,s,s)
+                        grid = grid.unsqueeze(0)               # (1,2,s,s)
+                    grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s) view
                     x = torch.cat([x, grid_rep], dim=1)
                 return x, self.output_data[indices]
             else:
@@ -370,12 +391,24 @@ class MultiResolutionDataset(MLMCDataset):
             # Load data from disk
             data = torch.load(self.data_path)
             if self.dataset == 'darcy':
-                x = torch.stack([
-                    data['coeff'][indices],
-                    data['Kcoeff'][indices],
-                    data['Kcoeff_x'][indices],
-                    data['Kcoeff_y'][indices]
-                ], dim=1)
+                if self.has_gradients and self.use_grads:
+                    x = torch.stack([
+                        data['coeff'][indices],
+                        data['Kcoeff'][indices],
+                        data['Kcoeff_x'][indices],
+                        data['Kcoeff_y'][indices]
+                    ], dim=1)  # (B, 4, s, s)
+                    if self.grid is not None:
+                        grid = self.grid
+                        grid = grid.permute(1, 0, 2, 3)  # (1,2,s,s) from (2,1,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)  # (B,2,s,s)
+                        x = torch.cat([x, grid_rep], dim=1)  # (B, 6, s, s)
+                else:
+                    x = data['coeff'][indices].unsqueeze(1)  # (B,1,s,s)
+                    if self.grid is not None:
+                        grid = self.grid.permute(1, 0, 2, 3)          # (1,2,s,s)
+                        grid_rep = grid.expand(len(indices), -1, -1, -1)
+                        x = torch.cat([x, grid_rep], dim=1)           # (B,3,s,s)
                 return x, data['sol'][indices]
             elif self.dataset == 'adr':
                 return data['coeff'][indices], data['sol'][indices]
@@ -411,16 +444,22 @@ class MultiResolutionDataset(MLMCDataset):
         
         Extends parent to also cache gradient tensors for Darcy dataset.
         """
+        # Ensure tensor on CPU for consistent indexing
+        if not isinstance(indices, torch.Tensor):
+            indices = torch.tensor(indices, dtype=torch.long)
+        else:
+            indices = indices.to(dtype=torch.long)
+
+        sorted_idx, _ = torch.sort(indices.cpu())
+
         # Call parent implementation for standard tensors
-        super().load_batch_indices_to_gpu(indices, device)
-        
+        super().load_batch_indices_to_gpu(sorted_idx, device)
+
         # Cache gradient tensors if present (Darcy-specific)
         if hasattr(self, 'input_smooth'):
-            if not isinstance(indices, torch.Tensor):
-                indices = torch.tensor(indices, dtype=torch.long)
-            self._gpu_smooth_cache = self.input_smooth[indices].clone().to(device)
-            self._gpu_gradx_cache = self.input_gradx[indices].clone().to(device)
-            self._gpu_grady_cache = self.input_grady[indices].clone().to(device)
+            self._gpu_smooth_cache = self.input_smooth[sorted_idx].contiguous().to(device)
+            self._gpu_gradx_cache  = self.input_gradx[sorted_idx].contiguous().to(device)
+            self._gpu_grady_cache  = self.input_grady[sorted_idx].contiguous().to(device)
 
     def unload_from_gpu(self, indices=None):
         """Clear GPU cache to free memory.
