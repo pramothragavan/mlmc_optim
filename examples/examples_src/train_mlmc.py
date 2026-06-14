@@ -47,20 +47,28 @@ def main():
 
     # Create per-resolution denormalizers for MLMC training
     denormalizers = None
+    eval_norm_stats = None
     if config.get('normalize', False) and config.get('model') in ['fno', 'fno3d']:
         denormalizers = {}
         device = config['device']
+
+        def make_denorm(m, s):
+            def denorm(x):
+                return x * (s + 1e-5) + m
+            return denorm
+
         for res, dataset in train_datasets.items():
             if hasattr(dataset, 'output_mean') and hasattr(dataset, 'output_std'):
                 mean = dataset.output_mean.to(device)
                 std = dataset.output_std.to(device)
-
-                def make_denorm(m, s):
-                    def denorm(x):
-                        return x * (s + 1e-5) + m
-                    return denorm
-
                 denormalizers[res] = make_denorm(mean, std)
+
+        eval_mean = dataset_specific.get('eval_output_mean')
+        eval_std = dataset_specific.get('eval_output_std')
+        if eval_mean is not None and eval_std is not None:
+            eval_norm_stats = (eval_mean, eval_std)
+            denormalizers[config['base_res']] = make_denorm(
+                eval_mean.to(device), eval_std.to(device))
 
     print(f"✓ Denormalizers: {'enabled' if denormalizers else 'disabled'}")
     print(f"✓ Loss reduction: {config['loss_reduction']}")
@@ -91,6 +99,7 @@ def main():
         eval_loader=eval_loader,
         grad_eval_fn=evaluate_gradient_differences if config['eval_grad_every'] else None,
         denormalizers=denormalizers,
+        eval_norm_stats=eval_norm_stats,
         device=config['device'],
         sample_sizes=config.get('sample_sizes', None),
         batch_sizes=config.get('batch_sizes', None),

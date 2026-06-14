@@ -1,9 +1,9 @@
 """Configuration utilities."""
 
 import argparse
+import ast
 import yaml
 from pathlib import Path
-from typing import Dict, Any
 from typing import Dict, Any
 from examples.examples_src.utils.utils import set_seed, get_device
 
@@ -42,6 +42,33 @@ def parse_int_list(v):
         return v
     # Otherwise try to parse as int
     return int(v)
+
+
+def parse_list(value):
+    """Parse list-like CLI/YAML strings without using eval."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in ("none", "null"):
+            return None
+        if stripped.startswith("[") or stripped.startswith("("):
+            return ast.literal_eval(stripped)
+        return value
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
+        return parse_list(value[0])
+    return value
+
+
+def coerce_nested(value, caster):
+    value = parse_list(value)
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list):
+        return [coerce_nested(item, caster) for item in value]
+    return caster(value)
 
 
 def nullable_float(value):
@@ -89,6 +116,8 @@ def _build_parser():
     parser.add_argument('--layer_dims', nargs='+', default=[16, 16, 16, 16], help='List of hidden dimensions for each layer (e.g., --layer_dims 32 64 128)')
     parser.add_argument('--fno_modes', type=int, default=8, help='Number of Fourier modes for FNO')
     parser.add_argument('--fno_width', type=int, default=32, help='Width of FNO layers')
+    parser.add_argument('--fno_final_fourier_relu', type=str2bool, default=False, help='Apply ReLU after final FNO Fourier block')
+    parser.add_argument('--fno_head_width', type=nullable_int, default=None, help='Hidden width of FNO pointwise projection head')
 
     # parabolic CNN specific arguments
     parser.add_argument('--operator_type', type=str, default='diagonal', choices=['diagonal', 'factored'], help='Type of elliptic operator for parabolic convolutions')
@@ -140,7 +169,7 @@ def _build_parser():
 
     # Memory management
     parser.add_argument('--load_in_memory', default=True, type=str2bool, help='Load entire dataset into RAM at startup (faster but requires more memory)')
-    parser.add_argument('--device', type=str, choices=['gpu', 'cuda', 'mps', 'cpu'], help='Device to run training on')
+    parser.add_argument('--device', type=str, choices=['gpu', 'cuda', 'xpu', 'mps', 'cpu'], help='Device to run training on')
     parser.add_argument('--pin_memory', default=False, type=str2bool, help='Pin CPU memory for faster data transfer to GPU (requires extra RAM)')
     parser.add_argument('--load_gpu', default=True, type=str2bool, help='Load entire dataset into GPU memory at startup (fastest but requires large GPU memory)')
     parser.add_argument('--load_gpu_epoch', default=False, type=str2bool, help='Load only current epoch batches to GPU (slower but uses less GPU memory)')
@@ -166,6 +195,11 @@ def _build_parser():
     parser.add_argument('--mlmc_max_level', type=int, default=None, help='Maximum MLMC level (overrides instead of all resolutions)')
     parser.add_argument('--mlmc_deterministic_batching', type=str2bool, default=False, help='Use deterministic (sequential) batching instead of random sampling')
     parser.add_argument('--mlmc_hierarchy_cache', type=str2bool, default=False, help='Whether to cache the hierarchy for MLMC optimisation')
+    parser.add_argument('--epochs_per_phase', nargs='+', default=None, help='Epoch count for each multiresolution phase')
+    parser.add_argument('--c2f_res_per_phase', nargs='+', default=None, help='Nested coarse-to-fine resolutions per phase')
+    parser.add_argument('--subset_size_per_phase', nargs='+', default=None, help='Nested per-resolution sample counts per phase')
+    parser.add_argument('--batch_size_per_phase', nargs='+', default=None, help='Nested per-resolution batch sizes per phase')
+    parser.add_argument('--lr_per_phase', nargs='+', default=None, help='Learning rates per phase')
 
     # Training
     parser.add_argument('--epochs', type=int, help='Number of epochs')
@@ -196,6 +230,10 @@ def _build_parser():
     parser.add_argument('--save_model', type=str2bool, default=False, help='Save model locally')
     parser.add_argument('--save_wandb_artifact', type=str2bool, default=False, help='Save model to wandb artifacts')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Directory to save checkpoints')
+    parser.add_argument('--out_dir', type=str, default=None, help='Directory for local run artifacts')
+    parser.add_argument('--save_final_checkpoint', type=str2bool, default=False, help='Save final_checkpoint.pt under out_dir')
+    parser.add_argument('--spectral_diagnostics', type=str2bool, default=False, help='Log spectral diagnostics during eval epochs')
+    parser.add_argument('--spectral_out_dir', type=str, default=None, help='Directory for spectral_data.npz and plots')
 
     parser.add_argument('--eval_grad_every', type=nullable_int, default=None, help='evaluate grad every N epochs')
     parser.add_argument('--eval_grad_rand', type=str2bool, default=False, help='use random sampling during gradient analysis')
@@ -279,17 +317,22 @@ def get_config() -> Dict[str, Any]:
         if v != defaults.get(k):
             config[k] = v
 
-    # Handle list arguments that may come as strings from sweeps
-    list_args = ['c2f_resolutions']
-    for arg in list_args:
+    # Handle list arguments that may come as strings from sweeps or shell CLI.
+    int_list_args = [
+        'c2f_resolutions',
+        'mlmc_samples_per_level',
+        'mlmc_batch_sizes',
+        'epochs_per_phase',
+        'c2f_res_per_phase',
+        'subset_size_per_phase',
+        'batch_size_per_phase',
+    ]
+    for arg in int_list_args:
         if arg in config and config[arg] is not None:
-            # If it's a string that looks like a list, eval it
-            if isinstance(config[arg], str) and config[arg].startswith('['):
-                config[arg] = eval(config[arg])
-            # If it's a list with a single string element, eval it
-            elif isinstance(config[arg], list) and len(config[arg]) > 0:
-                if isinstance(config[arg][0], str) and config[arg][0].startswith('['):
-                    config[arg] = eval(config[arg][0])
+            config[arg] = coerce_nested(config[arg], int)
+
+    if config.get('lr_per_phase') is not None:
+        config['lr_per_phase'] = coerce_nested(config['lr_per_phase'], float)
     
     # Handle mlmc_both_multiplier convenience parameter
     if config.get('mlmc_both_multiplier') is not None:

@@ -48,7 +48,7 @@ class SpectralConv2d(nn.Module):
 
 
 class FNO2d(nn.Module):
-    def __init__(self, modes1, modes2, width, in_channels=3, out_channels=1):
+    def __init__(self, modes1, modes2, width, in_channels=3, out_channels=1, final_fourier_relu=False, head_width=None):
         super(FNO2d, self).__init__()
 
         """
@@ -69,6 +69,8 @@ class FNO2d(nn.Module):
         self.width = width
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.final_fourier_relu = bool(final_fourier_relu)
+        self.head_width = 128 if head_width is None else int(head_width)
 
         self.fc0 = nn.Linear(in_channels, self.width)
 
@@ -83,8 +85,8 @@ class FNO2d(nn.Module):
         self.w2 = nn.Conv1d(self.width, self.width, 1)
         self.w3 = nn.Conv1d(self.width, self.width, 1)
 
-        self.fc1 = nn.Linear(self.width, 128)
-        self.fc2 = nn.Linear(128, out_channels)
+        self.fc1 = nn.Linear(self.width, self.head_width)
+        self.fc2 = nn.Linear(self.head_width, out_channels)
 
     def forward(self, x):
         x = x.permute(0, 2, 3, 1)
@@ -112,6 +114,8 @@ class FNO2d(nn.Module):
         x1 = self.conv3(x)
         x2 = self.w3(x.reshape(batchsize, self.width, -1)).reshape(batchsize, self.width, size_x, size_y)
         x = x1 + x2
+        if self.final_fourier_relu:
+            x = F.relu(x)
 
         x = x.permute(0, 2, 3, 1)
         x = self.fc1(x)

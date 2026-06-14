@@ -3,6 +3,7 @@
 Implements Multi-Level Monte Carlo training with variance reduction.
 """
 
+import json
 import os
 from collections import defaultdict
 import time
@@ -18,6 +19,99 @@ import matplotlib.pyplot as plt
 import copy
 
 from mlmc_optim.batcher import MLMCBatcher
+from mlmc_optim.spectral_diagnostics import SpectralDiagnostics
+
+
+def sync_device(device):
+    dev = str(device)
+    if dev.startswith("cuda") and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elif dev.startswith("xpu"):
+        xpu = getattr(torch, "xpu", None)
+        if xpu is not None and hasattr(xpu, "is_available") and xpu.is_available():
+            xpu.synchronize()
+
+
+def json_ready(obj):
+    if isinstance(obj, defaultdict):
+        obj = dict(obj)
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    if isinstance(obj, (np.integer, np.floating, np.bool_)):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if torch.is_tensor(obj):
+        obj = obj.detach().cpu()
+        return obj.item() if obj.numel() == 1 else obj.tolist()
+    if isinstance(obj, (list, tuple)):
+        return [json_ready(x) for x in obj]
+    if isinstance(obj, dict):
+        return {str(k): json_ready(v) for k, v in obj.items()}
+    return str(obj)
+
+
+def write_local_outputs(config, history_rows, eval_rows):
+    out_dir = config.get("out_dir")
+    if not out_dir:
+        return
+
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "config.json"), "w") as f:
+        json.dump(json_ready(config), f, indent=2)
+    with open(os.path.join(out_dir, "history.json"), "w") as f:
+        json.dump(json_ready(history_rows), f, indent=2)
+
+    if eval_rows:
+        arrays = {}
+        keys = sorted({k for row in eval_rows for k in row.keys()})
+        for key in keys:
+            vals = []
+            for row in eval_rows:
+                val = row.get(key, np.nan)
+                if val is None:
+                    vals.append(np.nan)
+                elif isinstance(val, (int, float, bool, np.integer, np.floating, np.bool_)):
+                    vals.append(float(val))
+                else:
+                    vals = None
+                    break
+            if vals is not None:
+                arrays[key] = np.asarray(vals, dtype=float)
+        if arrays:
+            np.savez(os.path.join(out_dir, "metrics_eval.npz"), **arrays)
+
+    final_eval = eval_rows[-1] if eval_rows else {}
+    final_history = history_rows[-1] if history_rows else {}
+    best_eval = None
+    for row in eval_rows:
+        val = row.get("test_loss")
+        if val is None:
+            continue
+        if best_eval is None or float(val) < float(best_eval.get("test_loss")):
+            best_eval = row
+    summary = {
+        "n_logged_rows": len(history_rows),
+        "n_eval_rows": len(eval_rows),
+        "final_test_loss": final_eval.get("test_loss"),
+        "best_test_loss": best_eval.get("test_loss") if best_eval else None,
+        "final_epoch_completed": (
+            int(final_history.get("epoch", -1)) + 1 if final_history else 0
+        ),
+        "final_eval_cum_train_time": final_eval.get(
+            "eval_cum_train_time", final_eval.get("cum_train_time")
+        ),
+    }
+    if final_history:
+        summary.update({
+            "final_cum_train_time": final_history.get("cum_train_time"),
+            "final_epoch_train_time": final_history.get("epoch_train_time"),
+            "final_time_per_sample": final_history.get("time_per_sample"),
+            "final_epoch_eval_block_time": final_history.get("epoch_eval_block_time"),
+            "final_epoch_total_time": final_history.get("epoch_total_time"),
+        })
+    with open(os.path.join(out_dir, "summary.json"), "w") as f:
+        json.dump(json_ready(summary), f, indent=2)
 
 
 class MLMCTrainer:
@@ -62,6 +156,7 @@ class MLMCTrainer:
         batch_sizes: Optional[List[int]] = None,
         normalizer: Optional[callable] = None,
         denormalizers: Optional[Dict[int, callable]] = None,
+        eval_norm_stats: Optional[tuple] = None,
         device: str = 'cuda',
         seed: int = None,
         epochs: int = 10,
@@ -88,6 +183,7 @@ class MLMCTrainer:
         self.eval_criterion = eval_criterion if eval_criterion is not None else criterion
         self.normalizer = normalizer
         self.denormalizers = denormalizers
+        self.eval_norm_stats = eval_norm_stats
         self.eval_fn = eval_fn
         self.eval_loader = eval_loader
         self.grad_eval_fn = grad_eval_fn
@@ -161,6 +257,83 @@ class MLMCTrainer:
             config=self.config,
             mode="online" if self.use_wandb else "disabled"
         )
+
+    def has_phase_schedule(self):
+        return bool(self.config.get("epochs_per_phase"))
+
+    def phase_total_epochs(self):
+        if self.has_phase_schedule():
+            total_epochs = int(sum(int(x) for x in self.config["epochs_per_phase"]))
+            self.config["epochs"] = total_epochs
+            self.config["total_epochs"] = total_epochs
+            return total_epochs
+        total_epochs = int(self.config.get("epochs", self.epochs))
+        self.config["total_epochs"] = total_epochs
+        return total_epochs
+
+    def phase_index(self, epoch, cumulative_epochs):
+        return int(np.searchsorted(cumulative_epochs, epoch, side="right") - 1)
+
+    def phase_params(self, phase=None):
+        if phase is None or not self.has_phase_schedule():
+            return self.c2f_resolutions, self.sample_sizes, self.batch_sizes
+
+        c2f_res_per_phase = self.config.get("c2f_res_per_phase")
+        subset_size_per_phase = self.config.get("subset_size_per_phase")
+        batch_size_per_phase = self.config.get("batch_size_per_phase")
+        if c2f_res_per_phase is None or subset_size_per_phase is None:
+            raise ValueError(
+                "Phase schedules require c2f_res_per_phase and subset_size_per_phase."
+            )
+
+        active_resolutions = [int(r) for r in c2f_res_per_phase[phase]]
+        active_sample_sizes = [int(n) for n in subset_size_per_phase[phase]]
+        if batch_size_per_phase is not None:
+            active_batch_sizes = [int(n) for n in batch_size_per_phase[phase]]
+        else:
+            active_batch_sizes = [int(self.batch_size)] * len(active_resolutions)
+
+        if not len(active_resolutions) == len(active_sample_sizes) == len(active_batch_sizes):
+            raise ValueError(
+                "Each phase must have matching resolution, sample-size, and "
+                "batch-size lengths."
+            )
+
+        return active_resolutions, active_sample_sizes, active_batch_sizes
+
+    def make_batcher(self, active_resolutions, sample_sizes, batch_sizes):
+        total_samples = len(self.train_datasets[active_resolutions[0]])
+        return MLMCBatcher(
+            self.config,
+            active_resolutions,
+            sample_sizes,
+            batch_sizes,
+            total_samples,
+            self.config.get("seed"),
+        )
+
+    def set_phase_lr(self, phase):
+        lr_per_phase = self.config.get("lr_per_phase")
+        if lr_per_phase is None:
+            return
+        new_lr = float(lr_per_phase[phase])
+        for group in self.optimizer.param_groups:
+            group["lr"] = new_lr
+        print(f"[lr_per_phase] entering phase {phase} with lr={new_lr:.3e}")
+
+    def eval_norm_stats_for_logging(self):
+        if not self.config.get("normalize", False):
+            return None, None
+        if self.eval_norm_stats is not None:
+            mean, std = self.eval_norm_stats
+            return mean.to(self.device), std.to(self.device)
+        base_res = self.config.get("base_res", self.c2f_resolutions[-1])
+        dataset = self.train_datasets.get(base_res)
+        if dataset is None:
+            dataset = self.train_datasets[self.c2f_resolutions[-1]]
+        if hasattr(dataset, "output_mean") and hasattr(dataset, "output_std"):
+            return dataset.output_mean.to(self.device), dataset.output_std.to(self.device)
+        return None, None
 
     def get_sample_sizes(self):
         """Get sample sizes for each level based on config."""
@@ -359,6 +532,9 @@ class MLMCTrainer:
         train_losses = []
         cum_train_time = 0
         best_test_loss = float('inf')
+        history_rows = []
+        eval_rows = []
+        last_test_loss = None
 
         timing_stats = {
             'ts_batch_creation': 0,
@@ -368,15 +544,49 @@ class MLMCTrainer:
             'ts_backward': 0  # Single backward pass time per batch
         }
 
-        # Setup total_epochs and epochs_per_phase for progressive refinement
-        total_epochs = config['epochs']
+        total_epochs = self.phase_total_epochs()
+        cumulative_epochs = np.cumsum([0] + config.get("epochs_per_phase", [total_epochs]))
+        prev_phase = None
+
+        spectral_diag = None
+        if config.get("spectral_diagnostics", False):
+            if self.eval_loader is None:
+                raise ValueError("spectral_diagnostics requires eval_loader.")
+            spectral_out_dir = config.get("spectral_out_dir")
+            if spectral_out_dir is None:
+                spectral_out_dir = os.path.join(config.get("out_dir", "."), "spectral")
+                config["spectral_out_dir"] = spectral_out_dir
+            spectral_diag = SpectralDiagnostics(
+                modes=config.get("fno_modes", 8),
+                eval_loader=self.eval_loader,
+                device=device,
+                out_dir=spectral_out_dir,
+            )
+            print(f"Spectral diagnostics enabled, saving to {spectral_out_dir}")
 
         for epoch in range(total_epochs):
             print(f"\nEpoch {epoch + 1}/{total_epochs}")
             self.model.train()
+            sync_device(device)
+            epoch_start = time.time()
+            eval_time_total = 0.0
             batch_creation_start = time.time()
 
-            idxs_per_res, batches = self.batcher.get_epoch_indices()
+            if self.has_phase_schedule():
+                phase = self.phase_index(epoch, cumulative_epochs)
+                if phase != prev_phase:
+                    self.set_phase_lr(phase)
+                    prev_phase = phase
+                active_resolutions, active_sample_sizes, active_batch_sizes = self.phase_params(phase)
+                batcher = self.make_batcher(
+                    active_resolutions, active_sample_sizes, active_batch_sizes
+                )
+            else:
+                phase = None
+                active_resolutions = self.c2f_resolutions
+                batcher = self.batcher
+
+            idxs_per_res, batches = batcher.get_epoch_indices()
             # Batch diagnostics: print explicit shapes for coarsest-level indices
             # try:
             #     if batches:
@@ -415,7 +625,6 @@ class MLMCTrainer:
             timing_stats['ts_batch_creation'] += time.time() - batch_creation_start
 
             # Training loop
-            epoch_start = time.time()
             pbar = tqdm(total=len(batches), desc=f"Epoch {epoch}")
             for batch_idx, batch in enumerate(batches):
 
@@ -637,8 +846,8 @@ class MLMCTrainer:
 
             pbar.close()
 
-            # Step LR scheduler if present
-            if hasattr(self, 'scheduler') and self.scheduler is not None:
+            # Step LR scheduler if present. Phase-specific LR schedules own the LR.
+            if hasattr(self, 'scheduler') and self.scheduler is not None and config.get("lr_per_phase") is None:
                 self.scheduler.step()
 
 
@@ -657,10 +866,30 @@ class MLMCTrainer:
 
             # Calculate total loss as sum of coarse and pair losses
             total_loss = coarse_loss + sum(pair_losses.values())
+            current_lr = self.optimizer.param_groups[0].get("lr", self.lr)
+            log_metrics = {
+                'epoch': epoch,
+                'epoch_completed': epoch + 1,
+                'coarse_loss': coarse_loss,
+                'total_loss': total_loss,
+                'epoch_train_time': epoch_train_time,
+                'cum_train_time': cum_train_time,
+                'cumulative_train_time': cum_train_time,
+                'time_per_sample': train_time_per_sample,
+                'n_train_samples': total_samples,
+                'n_optimizer_steps': total_steps,
+                'lr': current_lr,
+                'phase': -1 if phase is None else phase,
+                'phase_resolution': (
+                    active_resolutions[-1] if active_resolutions else None
+                ),
+                **{f'pair_loss_{k}': v for k, v in pair_losses.items()},
+            }
 
             # Evaluation phase (every eval_every epochs or at the end)
             if self.eval_every and (epoch % self.eval_every == 0 or epoch == total_epochs - 1):
                 eval_start = time.time()
+                eval_denorm = None
                 
                 if self.eval_fn is not None:
                     # Use provided eval function - it returns metrics dict.
@@ -670,8 +899,8 @@ class MLMCTrainer:
 
                     # For evaluation, use the finest-resolution denormalizer if available
                     if self.denormalizers is not None and isinstance(self.denormalizers, dict):
-                        finest_res = self.c2f_resolutions[-1]
-                        eval_denorm = self.denormalizers.get(finest_res, None)
+                        eval_res = config.get("base_res", self.c2f_resolutions[-1])
+                        eval_denorm = self.denormalizers.get(eval_res, None)
                     else:
                         eval_denorm = None
 
@@ -688,15 +917,18 @@ class MLMCTrainer:
                     # Minimal evaluation - just compute test loss
                     self.model.eval()
                     test_loss = 0.0
-                    test_dataset = self.test_datasets[self.c2f_resolutions[-1]]
+                    eval_res = config.get("base_res", self.c2f_resolutions[-1])
+                    test_dataset = self.test_datasets[eval_res]
                     with torch.no_grad():
                         for i in range(len(test_dataset)):
                             data, target = test_dataset[i]
                             data, target = data.to(device).unsqueeze(0), target.to(device).unsqueeze(0)
                             output = self.model(data)
-                            if self.denormalizer:
-                                output = self.denormalizer(output)
-                                target = self.denormalizer(target)
+                            if self.denormalizers:
+                                denorm = self.denormalizers.get(eval_res)
+                                if denorm is not None:
+                                    output = denorm(output)
+                                    target = denorm(target)
                             test_loss += self.criterion(output, target).item()
                     test_loss /= len(test_dataset)
                     self.model.train()
@@ -706,12 +938,15 @@ class MLMCTrainer:
                     eval_metrics = {'test_loss': test_loss}
                 
                 epoch_eval_time = time.time() - eval_start
-                eval_times.append(epoch_eval_time)
-                total_eval_time += epoch_eval_time
+                eval_time_total = epoch_eval_time
+                last_test_loss = test_loss
                 
                 # Track best loss and save model
-                if (config.get('save_model', False) or config.get('save_wandb_artifact', False)) and (test_loss < best_test_loss or epoch == config['epochs'] - 1):
+                improved = test_loss < best_test_loss
+                if improved:
                     best_test_loss = test_loss
+
+                if (config.get('save_model', False) or config.get('save_wandb_artifact', False)) and (improved or epoch == total_epochs - 1):
                     metrics = {
                         'test_loss': test_loss,
                         'coarse_loss': coarse_loss,
@@ -722,16 +957,11 @@ class MLMCTrainer:
                     print(f"  ✓ Saved best model (test_loss: {test_loss:.6f})")
                 
                 # Prepare metrics for logging
-                log_metrics = {
-                    'epoch': epoch,
-                    'coarse_loss': coarse_loss,
-                    'total_loss': total_loss,
-                    'epoch_train_time': epoch_train_time,
+                log_metrics.update({
                     'epoch_eval_time': epoch_eval_time,
-                    'cumulative_train_time': cum_train_time,
-                    **{f'pair_loss_{k}': v for k, v in pair_losses.items()},
-                    **eval_metrics  # Include all eval metrics
-                }
+                    'eval_cum_train_time': cum_train_time,
+                    **eval_metrics,  # Include all eval metrics
+                })
 
                 # Generate prediction plots if enabled
                 eval_plot_every = config.get('eval_plot_every', None)
@@ -739,10 +969,12 @@ class MLMCTrainer:
                     try:
                         fig = self.plot_fn(
                             model=self.model,
-                            dataset=self.test_datasets[self.c2f_resolutions[-1]],
+                            dataset=self.test_datasets[
+                                config.get("base_res", self.c2f_resolutions[-1])
+                            ],
                             device=device,
                             epoch=epoch,
-                            denormalizer=self.denormalizer
+                            denormalizer=eval_denorm
                         )
                         
                         # Log to wandb if enabled
@@ -769,7 +1001,7 @@ class MLMCTrainer:
                     # try:
                     # Choose batches for gradient analysis
                     if self.eval_grad_rand:
-                        _, grad_batches = self.batcher.get_epoch_indices()
+                        _, grad_batches = batcher.get_epoch_indices()
                     else:
                         grad_batches = copy.deepcopy(batches)
 
@@ -805,6 +1037,24 @@ class MLMCTrainer:
                     # except Exception as e:
                     #     print(f"Warning: gradient analysis failed: {e}")
 
+                if spectral_diag is not None:
+                    spectral_start = time.time()
+                    train_mean_eval, train_std_eval = self.eval_norm_stats_for_logging()
+                    spectral_diag.log_epoch(
+                        self.model,
+                        epoch,
+                        train_mean_eval,
+                        train_std_eval,
+                        config,
+                        phase_res=active_resolutions[-1] if active_resolutions else None,
+                    )
+                    eval_time_total += time.time() - spectral_start
+
+                epoch_eval_block_time = time.time() - eval_start
+                eval_times.append(epoch_eval_block_time)
+                total_eval_time += epoch_eval_block_time
+                log_metrics['epoch_eval_block_time'] = epoch_eval_block_time
+
                 # Log to wandb if enabled
                 if self.use_wandb:
                     wandb.log(log_metrics, step=epoch + 1)
@@ -820,16 +1070,16 @@ class MLMCTrainer:
             else:
                 # No evaluation this epoch - just log training metrics
                 if self.use_wandb:
-                    log_metrics = {
-                        'epoch': epoch,
-                        'coarse_loss': coarse_loss,
-                        'total_loss': total_loss,
-                        'epoch_train_time': epoch_train_time,
-                        'cumulative_train_time': cum_train_time,
-                        **{f'pair_loss_{k}': v for k, v in pair_losses.items()},
-                    }
                     wandb.log(log_metrics, step=epoch + 1)
                 print(f"\nEpoch {epoch+1}/{total_epochs} - Train Loss: {total_loss:.6f}")
+
+            epoch_total_time = time.time() - epoch_start
+            log_metrics['epoch_total_time'] = epoch_total_time
+            log_metrics.setdefault('epoch_eval_block_time', eval_time_total)
+            local_row = json_ready(log_metrics)
+            history_rows.append(local_row)
+            if "test_loss" in local_row:
+                eval_rows.append(local_row)
 
             if config['load_gpu_epoch']:
                 self.unload_epoch_indices_from_gpu(self.train_datasets, idxs_per_res)
@@ -842,10 +1092,46 @@ class MLMCTrainer:
         print(f"Total Training Time: {total_train_time:.2f}s")
         if eval_times:
             print(f"Total Evaluation Time: {total_eval_time:.2f}s")
-        print(f"Best Test Loss: {best_test_loss:.6f}")
+        reported_best = (
+            best_test_loss
+            if np.isfinite(best_test_loss)
+            else (last_test_loss if last_test_loss is not None else 0.0)
+        )
+        print(f"Best Test Loss: {reported_best:.6f}")
         print(f"Final Train Loss: {train_losses[-1] if train_losses else 0.0:.6f}")
 
-        return best_test_loss, train_losses
+        if spectral_diag is not None and spectral_diag.epochs:
+            spectral_diag.save_and_plot()
+
+        out_dir = config.get("out_dir")
+        if config.get("save_final_checkpoint", False) and out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            checkpoint = {
+                "epoch_completed": total_epochs,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": (
+                    self.scheduler.state_dict() if self.scheduler is not None else None
+                ),
+                "config": json_ready(config),
+                "metrics": {
+                    "best_test_loss": reported_best,
+                    "final_test_loss": last_test_loss,
+                    "final_train_loss": train_losses[-1] if train_losses else 0.0,
+                    "cum_train_time": cum_train_time,
+                    "total_eval_time": total_eval_time,
+                },
+            }
+            final_path = os.path.join(out_dir, "final_checkpoint.pt")
+            torch.save(checkpoint, final_path)
+            print(f"Saved final checkpoint to {final_path}")
+
+        write_local_outputs(config, history_rows, eval_rows)
+
+        if self.use_wandb:
+            wandb.finish()
+
+        return reported_best, train_losses
 
     def save_model(self, model, optimizer, epoch, config, metrics, is_best=False):
         """Save model checkpoint with wandb artifact support

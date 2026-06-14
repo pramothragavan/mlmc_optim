@@ -39,6 +39,8 @@ def get_model(config, input_channels=None, input_size=None, out_size=None):
             width=config['fno_width'],
             in_channels=input_channels,
             out_channels=config['out_channels'],
+            final_fourier_relu=config.get('fno_final_fourier_relu', False),
+            head_width=config.get('fno_head_width'),
         )
     
     elif model_type == 'fno3d':

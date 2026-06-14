@@ -384,7 +384,15 @@ def get_datasets(config, c2f_resolutions, device):
             norm_dataset(dep_dataset=test_datasets[config['base_res']],
                          ctrl_dataset=train_datasets[config['base_res']])
 
-    # if train dataset config['base_res'] is not in c2f_resolutions, delete it from train_datasets dict
+    if config['base_res'] in train_datasets:
+        base_train = train_datasets[config['base_res']]
+        if hasattr(base_train, 'output_mean') and hasattr(base_train, 'output_std'):
+            dataset_specific['eval_output_mean'] = base_train.output_mean
+            dataset_specific['eval_output_std'] = base_train.output_std
+            dataset_specific['eval_resolution'] = config['base_res']
+
+    # If the base-resolution train dataset was loaded only for test
+    # normalization, drop it after retaining its eval normalization stats.
     if config['base_res'] not in c2f_resolutions:
         del train_datasets[config['base_res']]
 
@@ -400,7 +408,7 @@ def get_datasets(config, c2f_resolutions, device):
         input_channels = 1
         if config['use_grads']:
             input_channels += 3
-        if config['model'] == 'fno':
+        if config['model'] == 'fno' and config.get('add_coords', False):
             input_channels += 2
     elif config['dataset'] == 'adr':
         input_channels = 1
