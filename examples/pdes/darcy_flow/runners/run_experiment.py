@@ -15,6 +15,8 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(REPO))
+from examples.examples_src.utils.config import str2bool
 
 
 def parse_json_arg(raw, name):
@@ -144,7 +146,9 @@ def build_config(args):
         "total_samples": int(args.total_samples),
         "train_subset": float(args.train_subset),
         "test_subset": float(args.test_subset),
-        "normalize": not args.no_normalize,
+        "normalize": bool(args.normalize),
+        "normalize_input": bool(args.normalize_input) if args.normalize_input is not None else bool(args.normalize),
+        "normalize_output": bool(args.normalize_output) if args.normalize_output is not None else bool(args.normalize),
         "add_coords": bool(args.add_coords),
         "use_grads": bool(args.darcy_use_grads),
         "load_in_memory": not args.no_load_in_memory,
@@ -228,7 +232,7 @@ def make_denorm(mean, std):
 
 
 def eval_norm_stats(dataset_specific, config):
-    if not config.get("normalize", False):
+    if not config.get("normalize_output", True):
         return None
     mean = dataset_specific.get("eval_output_mean")
     std = dataset_specific.get("eval_output_std")
@@ -238,7 +242,7 @@ def eval_norm_stats(dataset_specific, config):
 
 
 def make_denormalizers(train_datasets, config, dataset_specific=None):
-    if not config.get("normalize", False) or config.get("model") not in ["fno", "fno3d"]:
+    if not config.get("normalize_output", True) or config.get("model") not in ["fno", "fno3d"]:
         return None
 
     denormalizers = {}
@@ -345,7 +349,9 @@ def main(argv=None):
     parser.add_argument("--fno_head_width", type=int, default=None)
     parser.add_argument("--add_coords", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--darcy_use_grads", action="store_true")
-    parser.add_argument("--no_normalize", action="store_true")
+    parser.add_argument("--normalize", type=str2bool, default=True)
+    parser.add_argument("--normalize_input", type=str2bool, default=None)
+    parser.add_argument("--normalize_output", type=str2bool, default=None)
 
     parser.add_argument("--epochs_per_phase_json", default="[50, 50, 50, 50, 50]")
     parser.add_argument("--c2f_res_per_phase_json", default="[[15], [30], [60], [120], [241]]")

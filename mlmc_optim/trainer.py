@@ -322,7 +322,7 @@ class MLMCTrainer:
         print(f"[lr_per_phase] entering phase {phase} with lr={new_lr:.3e}")
 
     def eval_norm_stats_for_logging(self):
-        if not self.config.get("normalize", False):
+        if not self.config.get("normalize_output", True):
             return None, None
         if self.eval_norm_stats is not None:
             mean, std = self.eval_norm_stats

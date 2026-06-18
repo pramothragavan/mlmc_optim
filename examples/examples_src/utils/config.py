@@ -158,7 +158,9 @@ def _build_parser():
     parser.add_argument('--add_coords', type=str2bool, default=False, help='Add coordinate channels')
     parser.add_argument('--train_subset', type=float, default=1., help='Train subset fraction')
     parser.add_argument('--test_subset', type=float, default=1., help='Test subset fraction')
-    parser.add_argument('--normalize', type=str2bool, default=True, help='Whether to normalize the data')
+    parser.add_argument('--normalize', type=str2bool, default=True, help='Whether to normalize data (sets both input and output)')
+    parser.add_argument('--normalize_input', type=str2bool, default=None, help='Override: whether to normalize inputs')
+    parser.add_argument('--normalize_output', type=str2bool, default=None, help='Override: whether to normalize outputs')
     parser.add_argument('--use_grads', default=False, type=str2bool, help='Use gradient data')
     parser.add_argument('--mixed_res_training', default=False, type=str2bool, help='Use mixed resolution training')
     parser.add_argument('--mixed_res_mode', type=str, default='uniform', choices=['uniform', 'mlmc_schedule'], help='Mixed-res sampling mode')
@@ -339,6 +341,13 @@ def get_config() -> Dict[str, Any]:
         config['mlmc_batch_size_multiplier'] = config['mlmc_both_multiplier']
         config['mlmc_data_size_multiplier'] = config['mlmc_both_multiplier']
     
+    # Resolve normalize_input / normalize_output from normalize base flag
+    _norm_base = config.get('normalize', True)
+    if config.get('normalize_input') is None:
+        config['normalize_input'] = _norm_base
+    if config.get('normalize_output') is None:
+        config['normalize_output'] = _norm_base
+
     # Handle ginot_both_dim convenience parameter
     if config.get('ginot_both_dim'):
         config['ginot_embed_dim'] = config['ginot_both_dim']

@@ -106,7 +106,7 @@ def get_denormalizer(train_datasets: Dict[int, MultiResolutionDataset],
     Returns:
         Denormalizer function or None if normalization is disabled
     """
-    if not config['normalize']:
+    if not config.get('normalize_output', True):
         return None
 
     # Get stats from finest resolution

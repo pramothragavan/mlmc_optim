@@ -85,7 +85,7 @@ class SpectralDiagnostics:
             data, target = data.to(self.device), target.to(self.device)
             output = model(data)
 
-            if config.get('normalize') and train_mean is not None:
+            if config.get('normalize_output', True) and train_mean is not None:
                 output = decode(output, train_mean, train_std)
                 target = decode(target, train_mean, train_std)
 
@@ -183,7 +183,7 @@ class SpectralDiagnostics:
         data, target = data.to(self.device), target.to(self.device)
         output = model(data)
 
-        if config.get('normalize') and train_mean is not None:
+        if config.get('normalize_output', True) and train_mean is not None:
             output = decode(output, train_mean, train_std)
             target = decode(target, train_mean, train_std)
 

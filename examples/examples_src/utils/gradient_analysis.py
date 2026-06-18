@@ -206,7 +206,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             fine_data = fine_data.to(device)
             fine_target = fine_target.to(device)
             output_fine = model(fine_data)
-            if config['normalize']:
+            if config.get('normalize_output', True):
                 output_fine = decode(output_fine, train_means[fine_res], train_stds[fine_res])
                 target_fine = decode(fine_target, train_means[fine_res], train_stds[fine_res])
             else:
@@ -234,7 +234,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             coarse_data = coarse_data.to(device)
             coarse_target = coarse_target.to(device)
             output_coarse = model(coarse_data)
-            if config['normalize']:
+            if config.get('normalize_output', True):
                 output_coarse = decode(output_coarse, train_means[coarse_res], train_stds[coarse_res])
                 target_coarse = decode(coarse_target, train_means[coarse_res], train_stds[coarse_res])
             else:
@@ -364,7 +364,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             data, targets = train_datasets[res].get_items([0])
             data, targets = data.to(device), targets.to(device)
             output = model(data)
-            if config['normalize']:
+            if config.get('normalize_output', True):
                 output = decode(output, train_means[res], train_stds[res])
                 targets = decode(targets, train_means[res], train_stds[res])
             if config['loss_type'] == 'L2':
@@ -390,7 +390,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
                     data, targets = train_datasets[res].get_items([i])
                     data, targets = data.to(device), targets.to(device)
                     output = model(data)
-                    if config['normalize']:
+                    if config.get('normalize_output', True):
                         output = decode(output, train_means[res], train_stds[res])
                         targets = decode(targets, train_means[res], train_stds[res])
                     if config['loss_type'] == 'L2':
@@ -480,7 +480,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
         data, targets = data.to(device), targets.to(device)
         model.zero_grad()
         output = model(data)
-        if config['normalize']:
+        if config.get('normalize_output', True):
             output = decode(output, train_means[finest_res], train_stds[finest_res])
             targets = decode(targets, train_means[finest_res], train_stds[finest_res])
         if config['loss_type'] == 'L2':
@@ -506,7 +506,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             data, targets = data.to(device), targets.to(device)
             model.zero_grad()
             output = model(data)
-            if config.get('normalize', False):
+            if config.get('normalize_output', True):
                 output = decode(output, train_means[res], train_stds[res])
                 targets = decode(targets, train_means[res], train_stds[res])
             if config['loss_type'] == 'L2':
@@ -643,7 +643,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             fine_data, fine_targets = train_datasets[fine_res].get_items(correction_indices)
             fine_data, fine_targets = fine_data.to(device), fine_targets.to(device)
             output_fine = model(fine_data)
-            if config['normalize']:
+            if config.get('normalize_output', True):
                 output_fine = decode(output_fine, train_means[fine_res], train_stds[fine_res])
                 targets_fine = decode(fine_targets, train_means[fine_res], train_stds[fine_res])
             else:
@@ -656,7 +656,7 @@ def evaluate_gradient_differences(model, config, criterion, train_datasets, trai
             coarse_data, coarse_targets = train_datasets[coarse_res].get_items(correction_indices)
             coarse_data, coarse_targets = coarse_data.to(device), coarse_targets.to(device)
             output_coarse = model(coarse_data)
-            if config['normalize']:
+            if config.get('normalize_output', True):
                 output_coarse = decode(output_coarse, train_means[coarse_res], train_stds[coarse_res])
                 targets_coarse = decode(coarse_targets, train_means[coarse_res], train_stds[coarse_res])
             else:

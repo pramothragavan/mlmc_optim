@@ -48,7 +48,7 @@ def main():
     # Create per-resolution denormalizers for MLMC training
     denormalizers = None
     eval_norm_stats = None
-    if config.get('normalize', False) and config.get('model') in ['fno', 'fno3d']:
+    if config.get('normalize_output', True) and config.get('model') in ['fno', 'fno3d']:
         denormalizers = {}
         device = config['device']
 

@@ -95,17 +95,22 @@ def compute_grad_regularity(data: np.ndarray, dx: float) -> Tuple[float, float]:
     return mean_grad_l2, max_grad
 
 
-def norm_darcy_dataset(dep_dataset, ctrl_dataset, use_grads=True):
-    dep_dataset.input_data = encode(dep_dataset.input_data, ctrl_dataset.input_mean, ctrl_dataset.input_std)
-    if use_grads:
-        dep_dataset.input_smooth = encode(dep_dataset.input_smooth, ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
-        dep_dataset.input_gradx  = encode(dep_dataset.input_gradx,  ctrl_dataset.gradx_mean,  ctrl_dataset.gradx_std)
-        dep_dataset.input_grady  = encode(dep_dataset.input_grady,  ctrl_dataset.grady_mean,  ctrl_dataset.grady_std)
-    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
+def norm_darcy_dataset(dep_dataset, ctrl_dataset, use_grads=True,
+                       normalize_input=True, normalize_output=True):
+    if normalize_input:
+        dep_dataset.input_data = encode(dep_dataset.input_data, ctrl_dataset.input_mean, ctrl_dataset.input_std)
+        if use_grads:
+            dep_dataset.input_smooth = encode(dep_dataset.input_smooth, ctrl_dataset.smooth_mean, ctrl_dataset.smooth_std)
+            dep_dataset.input_gradx  = encode(dep_dataset.input_gradx,  ctrl_dataset.gradx_mean,  ctrl_dataset.gradx_std)
+            dep_dataset.input_grady  = encode(dep_dataset.input_grady,  ctrl_dataset.grady_mean,  ctrl_dataset.grady_std)
+    if normalize_output:
+        dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
-def norm_dataset(dep_dataset, ctrl_dataset):
-    dep_dataset.input_data  = encode(dep_dataset.input_data,  ctrl_dataset.input_mean,  ctrl_dataset.input_std)
-    dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
+def norm_dataset(dep_dataset, ctrl_dataset, normalize_input=True, normalize_output=True):
+    if normalize_input:
+        dep_dataset.input_data  = encode(dep_dataset.input_data,  ctrl_dataset.input_mean,  ctrl_dataset.input_std)
+    if normalize_output:
+        dep_dataset.output_data = encode(dep_dataset.output_data, ctrl_dataset.output_mean, ctrl_dataset.output_std)
 
 class MatReader:
     def __init__(self, file_path, to_torch=True, to_cuda=False, to_float=True):
@@ -222,6 +227,11 @@ def get_datasets(config, c2f_resolutions, device):
     # Load train datasets for each resolution
     temp_c2f_resolutions = c2f_resolutions + [config['base_res']]
 
+    normalize = config.get('normalize', True)
+    normalize_input = config.get('normalize_input') if config.get('normalize_input') is not None else normalize
+    normalize_output = config.get('normalize_output') if config.get('normalize_output') is not None else normalize
+    compute_stats = normalize_input or normalize_output
+
     for res in tqdm(temp_c2f_resolutions, desc="Loading datasets"):
         add_coords = config.get('add_coords', False)
         use_grads = config.get('use_grads', False)
@@ -233,7 +243,7 @@ def get_datasets(config, c2f_resolutions, device):
                 resolution=res,
                 train=True,
                 load_in_memory=config['load_in_memory'],
-                normalize=config['normalize'],
+                normalize=compute_stats,
                 add_coords=add_coords,
             )
         elif config['dataset'] in ['darcy', 'adr']:
@@ -243,7 +253,7 @@ def get_datasets(config, c2f_resolutions, device):
                 res,
                 train=True,
                 load_in_memory=config['load_in_memory'],
-                normalize=config['normalize'],
+                normalize=compute_stats,
                 add_coords=add_coords,
                 use_grads=use_grads
             )
@@ -257,7 +267,7 @@ def get_datasets(config, c2f_resolutions, device):
                 resolution=res,
                 train=True,
                 load_in_memory=config.get('load_in_memory', True),
-                normalize=config.get('normalize', True)
+                normalize=compute_stats
             )
 
             # Special handling for JEB dataset - we don't need to normalize per level
@@ -299,15 +309,17 @@ def get_datasets(config, c2f_resolutions, device):
                 data_split=data_split_train
             )
 
-        if config['normalize']:
-            # Normalize test dataset with respect to train dataset of the same resolution
+        if normalize_input or normalize_output:
             if config['dataset'] == 'darcy':
                 norm_darcy_dataset(dep_dataset=train_datasets[res], ctrl_dataset=train_datasets[res],
-                                   use_grads=config['use_grads'])
+                                   use_grads=config['use_grads'],
+                                   normalize_input=normalize_input, normalize_output=normalize_output)
             elif config['dataset'] == 'adr':
-                norm_dataset(dep_dataset=train_datasets[res], ctrl_dataset=train_datasets[res])
+                norm_dataset(dep_dataset=train_datasets[res], ctrl_dataset=train_datasets[res],
+                             normalize_input=normalize_input, normalize_output=normalize_output)
             elif config['dataset'] == 'navier_stokes':
-                norm_dataset(dep_dataset=train_datasets[res], ctrl_dataset=train_datasets[res])
+                norm_dataset(dep_dataset=train_datasets[res], ctrl_dataset=train_datasets[res],
+                             normalize_input=normalize_input, normalize_output=normalize_output)
 
     # Load test datasets for the config[base_res]
     if config['dataset'] == 'navier_stokes':
@@ -317,7 +329,7 @@ def get_datasets(config, c2f_resolutions, device):
             resolution=config['base_res'],
             train=False,
             load_in_memory=config['load_in_memory'],
-            normalize=config['normalize'],
+            normalize=compute_stats,
             add_coords=add_coords,
         )
     elif config['dataset'] in ['darcy', 'adr']:
@@ -327,7 +339,7 @@ def get_datasets(config, c2f_resolutions, device):
             config['base_res'],
             train=False,
             load_in_memory=config['load_in_memory'],
-            normalize=config['normalize'],
+            normalize=compute_stats,
             add_coords=add_coords,
             use_grads=use_grads
         )
@@ -340,7 +352,7 @@ def get_datasets(config, c2f_resolutions, device):
             resolution=config['base_res'],
             train=False,
             load_in_memory=config.get('load_in_memory', True),
-            normalize=config.get('normalize', True)
+            normalize=compute_stats
         )
     elif config['dataset'] == 'FlowPastCylinder':
         source_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "navier_stokes_data")
@@ -371,18 +383,20 @@ def get_datasets(config, c2f_resolutions, device):
             data_split=data_split_test
         )
 
-    if config['normalize']:
-        # Normalize test dataset with respect to train dataset of the same resolution
+    if normalize_input or normalize_output:
         if config['dataset'] == 'darcy':
             norm_darcy_dataset(dep_dataset=test_datasets[config['base_res']],
                                ctrl_dataset=train_datasets[config['base_res']],
-                               use_grads=config['use_grads'])
+                               use_grads=config['use_grads'],
+                               normalize_input=normalize_input, normalize_output=normalize_output)
         elif config['dataset'] == 'adr':
             norm_dataset(dep_dataset=test_datasets[config['base_res']],
-                         ctrl_dataset=train_datasets[config['base_res']])
+                         ctrl_dataset=train_datasets[config['base_res']],
+                         normalize_input=normalize_input, normalize_output=normalize_output)
         elif config['dataset'] == 'navier_stokes':
             norm_dataset(dep_dataset=test_datasets[config['base_res']],
-                         ctrl_dataset=train_datasets[config['base_res']])
+                         ctrl_dataset=train_datasets[config['base_res']],
+                         normalize_input=normalize_input, normalize_output=normalize_output)
 
     if config['base_res'] in train_datasets:
         base_train = train_datasets[config['base_res']]
