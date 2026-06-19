@@ -205,6 +205,27 @@ def build_config(args):
         "output_dir": str(out_dir),
         "spectral_diagnostics": not args.no_spectral,
         "spectral_out_dir": str(out_dir / "spectral"),
+        "kernel_drift_diagnostics": bool(args.kernel_drift),
+        "kernel_drift_out_dir": str(out_dir / "kernel_drift"),
+        "kernel_drift_epochs": (
+            [int(x) for x in parse_json_arg(
+                args.kernel_drift_epochs_json, "kernel_drift_epochs_json")]
+            if args.kernel_drift_epochs_json is not None else None
+        ),
+        "kernel_drift_probe_split": args.kernel_drift_probe_split,
+        "kernel_drift_probe_res": args.kernel_drift_probe_res,
+        "kernel_drift_probe_samples": int(args.kernel_drift_probe_samples),
+        "kernel_drift_probe_batch_size": int(args.kernel_drift_probe_batch_size),
+        "kernel_drift_projection_type": args.kernel_drift_projection_type,
+        "kernel_drift_num_projections": int(args.kernel_drift_num_projections),
+        "kernel_drift_fourier_radius": int(args.kernel_drift_fourier_radius),
+        "kernel_drift_include_mean": bool(args.kernel_drift_include_mean),
+        "kernel_drift_max_rows": int(args.kernel_drift_max_rows),
+        "kernel_drift_save_kernels": bool(args.kernel_drift_save_kernels),
+        "kernel_drift_save_jacobian": bool(args.kernel_drift_save_jacobian),
+        "kernel_drift_save_projections": bool(args.kernel_drift_save_projections),
+        "kernel_drift_denormalize_output": bool(args.kernel_drift_denormalize_output),
+        "kernel_drift_seed": args.kernel_drift_seed,
         "use_wandb": bool(args.use_wandb),
         "wandb_project": args.wandb_project,
         "wandb_entity": args.wandb_entity,
@@ -370,6 +391,23 @@ def main(argv=None):
     parser.add_argument("--no_spectral", action="store_true")
     parser.add_argument("--save_final_checkpoint", action="store_true")
     parser.add_argument("--extra_config_json", default=None)
+
+    parser.add_argument("--kernel_drift", action="store_true")
+    parser.add_argument("--kernel_drift_epochs_json", default=None)
+    parser.add_argument("--kernel_drift_probe_split", choices=["train", "test"], default="train")
+    parser.add_argument("--kernel_drift_probe_res", type=int, default=None)
+    parser.add_argument("--kernel_drift_probe_samples", type=int, default=64)
+    parser.add_argument("--kernel_drift_probe_batch_size", type=int, default=4)
+    parser.add_argument("--kernel_drift_projection_type", choices=["fourier", "random"], default="fourier")
+    parser.add_argument("--kernel_drift_num_projections", type=int, default=16)
+    parser.add_argument("--kernel_drift_fourier_radius", type=int, default=8)
+    parser.add_argument("--kernel_drift_include_mean", action="store_true")
+    parser.add_argument("--kernel_drift_max_rows", type=int, default=2048)
+    parser.add_argument("--kernel_drift_save_kernels", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--kernel_drift_save_jacobian", action="store_true")
+    parser.add_argument("--kernel_drift_save_projections", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--kernel_drift_denormalize_output", action="store_true")
+    parser.add_argument("--kernel_drift_seed", type=int, default=None)
 
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--wandb_project", default="mlmc-optim-darcy")

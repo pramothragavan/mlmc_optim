@@ -405,9 +405,17 @@ def get_datasets(config, c2f_resolutions, device):
             dataset_specific['eval_output_std'] = base_train.output_std
             dataset_specific['eval_resolution'] = config['base_res']
 
+    keep_base_train_for_kernel_drift = (
+        config.get('kernel_drift_diagnostics', False)
+        and config.get('kernel_drift_probe_split', 'train') == 'train'
+        and int(config.get('kernel_drift_probe_res') or config['base_res']) == int(config['base_res'])
+    )
+
     # If the base-resolution train dataset was loaded only for test
     # normalization, drop it after retaining its eval normalization stats.
-    if config['base_res'] not in c2f_resolutions:
+    # Kernel-drift diagnostics can intentionally keep it so single-resolution
+    # coarse baselines are still probed at the finest evaluation resolution.
+    if config['base_res'] not in c2f_resolutions and not keep_base_train_for_kernel_drift:
         del train_datasets[config['base_res']]
 
     if config['load_gpu'] and not config['load_gpu_epoch']:

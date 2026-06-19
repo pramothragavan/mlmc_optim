@@ -20,6 +20,7 @@ import copy
 
 from mlmc_optim.batcher import MLMCBatcher
 from mlmc_optim.spectral_diagnostics import SpectralDiagnostics
+from mlmc_optim.kernel_drift import KernelDriftDiagnostics
 
 
 def sync_device(device):
@@ -564,6 +565,58 @@ class MLMCTrainer:
             )
             print(f"Spectral diagnostics enabled, saving to {spectral_out_dir}")
 
+        kernel_drift_diag = None
+        if config.get("kernel_drift_diagnostics", False):
+            probe_split = str(config.get("kernel_drift_probe_split", "train"))
+            probe_res_config = config.get("kernel_drift_probe_res")
+            if probe_res_config is None:
+                base_res = int(config.get("base_res", self.c2f_resolutions[-1]))
+                probe_res = base_res if base_res in self.train_datasets else int(self.c2f_resolutions[-1])
+            else:
+                probe_res = int(probe_res_config)
+            if probe_split == "train":
+                if probe_res not in self.train_datasets:
+                    raise ValueError(
+                        f"kernel_drift_probe_res={probe_res} is not in train_datasets "
+                        f"{sorted(self.train_datasets)}.")
+                probe_dataset = self.train_datasets[probe_res]
+            elif probe_split == "test":
+                base_res = config.get("base_res", self.c2f_resolutions[-1])
+                probe_dataset = self.test_datasets[base_res]
+                probe_res = int(base_res)
+            else:
+                raise ValueError("kernel_drift_probe_split must be 'train' or 'test'.")
+
+            denormalizer = None
+            if self.denormalizers is not None:
+                denormalizer = self.denormalizers.get(probe_res)
+            kernel_out_dir = config.get("kernel_drift_out_dir")
+            if kernel_out_dir is None:
+                kernel_out_dir = os.path.join(config.get("out_dir", "."), "kernel_drift")
+                config["kernel_drift_out_dir"] = kernel_out_dir
+            kernel_drift_diag = KernelDriftDiagnostics(
+                config=config,
+                dataset=probe_dataset,
+                device=device,
+                denormalizer=denormalizer,
+                out_dir=kernel_out_dir,
+            )
+            print(
+                "Kernel drift diagnostics enabled: "
+                f"split={probe_split}, res={probe_res}, out={kernel_out_dir}"
+            )
+
+        if kernel_drift_diag is not None and kernel_drift_diag.should_log(0):
+            init_phase = self.phase_index(0, cumulative_epochs) if self.has_phase_schedule() else None
+            init_resolutions, _, _ = self.phase_params(init_phase)
+            kernel_drift_diag.log_snapshot(
+                self.model,
+                epoch_completed=0,
+                phase=init_phase,
+                phase_res=init_resolutions[-1] if init_resolutions else None,
+                cum_train_time=0.0,
+            )
+
         for epoch in range(total_epochs):
             print(f"\nEpoch {epoch + 1}/{total_epochs}")
             self.model.train()
@@ -1055,10 +1108,6 @@ class MLMCTrainer:
                 total_eval_time += epoch_eval_block_time
                 log_metrics['epoch_eval_block_time'] = epoch_eval_block_time
 
-                # Log to wandb if enabled
-                if self.use_wandb:
-                    wandb.log(log_metrics, step=epoch + 1)
-                
                 # Print summary
                 print(f"\nEpoch {epoch+1}/{total_epochs}")
                 print(f"  Train - Coarse: {coarse_loss:.6f}, Total: {total_loss:.6f}")
@@ -1069,13 +1118,34 @@ class MLMCTrainer:
                 print(f"  Time - Train: {epoch_train_time:.2f}s, Eval: {epoch_eval_time:.2f}s")
             else:
                 # No evaluation this epoch - just log training metrics
-                if self.use_wandb:
-                    wandb.log(log_metrics, step=epoch + 1)
                 print(f"\nEpoch {epoch+1}/{total_epochs} - Train Loss: {total_loss:.6f}")
+
+            if (
+                kernel_drift_diag is not None
+                and kernel_drift_diag.should_log(epoch + 1)
+            ):
+                kernel_start = time.time()
+                kernel_metrics = kernel_drift_diag.log_snapshot(
+                    self.model,
+                    epoch_completed=epoch + 1,
+                    phase=phase,
+                    phase_res=active_resolutions[-1] if active_resolutions else None,
+                    cum_train_time=cum_train_time,
+                )
+                log_metrics.update({
+                    f"kernel_drift/{k}": v
+                    for k, v in kernel_metrics.items()
+                    if isinstance(v, (int, float, np.integer, np.floating))
+                })
+                log_metrics["kernel_drift/elapsed_time"] = time.time() - kernel_start
 
             epoch_total_time = time.time() - epoch_start
             log_metrics['epoch_total_time'] = epoch_total_time
             log_metrics.setdefault('epoch_eval_block_time', eval_time_total)
+
+            if self.use_wandb:
+                wandb.log(log_metrics, step=epoch + 1)
+
             local_row = json_ready(log_metrics)
             history_rows.append(local_row)
             if "test_loss" in local_row:
@@ -1102,6 +1172,9 @@ class MLMCTrainer:
 
         if spectral_diag is not None and spectral_diag.epochs:
             spectral_diag.save_and_plot()
+
+        if kernel_drift_diag is not None:
+            kernel_drift_diag.save_summary()
 
         out_dir = config.get("out_dir")
         if config.get("save_final_checkpoint", False) and out_dir:

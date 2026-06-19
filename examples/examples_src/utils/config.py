@@ -237,6 +237,25 @@ def _build_parser():
     parser.add_argument('--spectral_diagnostics', type=str2bool, default=False, help='Log spectral diagnostics during eval epochs')
     parser.add_argument('--spectral_out_dir', type=str, default=None, help='Directory for spectral_data.npz and plots')
 
+    parser.add_argument('--kernel_drift_diagnostics', type=str2bool, default=False, help='Log projected empirical-NTK drift snapshots')
+    parser.add_argument('--kernel_drift_out_dir', type=str, default=None, help='Directory for kernel-drift snapshots and summary files')
+    parser.add_argument('--kernel_drift_epochs', nargs='+', default=None, help='Completed epochs at which to snapshot empirical kernels')
+    parser.add_argument('--kernel_drift_probe_split', type=str, default='train', choices=['train', 'test'], help='Dataset split used for the fixed kernel-drift probe')
+    parser.add_argument('--kernel_drift_probe_res', type=nullable_int, default=None, help='Resolution used for the fixed train probe; defaults to finest/base_res')
+    parser.add_argument('--kernel_drift_probe_samples', type=int, default=64, help='Number of fixed Darcy samples in the empirical-NTK probe')
+    parser.add_argument('--kernel_drift_probe_indices', nargs='+', default=None, help='Optional explicit probe sample indices')
+    parser.add_argument('--kernel_drift_probe_batch_size', type=int, default=4, help='Probe samples per Jacobian forward graph')
+    parser.add_argument('--kernel_drift_projection_type', type=str, default='fourier', choices=['fourier', 'random'], help='Output projections used for the projected empirical NTK')
+    parser.add_argument('--kernel_drift_num_projections', type=int, default=16, help='Number of output projections per probe sample')
+    parser.add_argument('--kernel_drift_fourier_radius', type=int, default=8, help='Maximum Fourier radius for Fourier output projections')
+    parser.add_argument('--kernel_drift_include_mean', type=str2bool, default=False, help='Include the zero Fourier mode as an output projection')
+    parser.add_argument('--kernel_drift_max_rows', type=int, default=2048, help='Safety limit for probe_samples * num_projections')
+    parser.add_argument('--kernel_drift_save_kernels', type=str2bool, default=True, help='Save projected empirical kernel matrices')
+    parser.add_argument('--kernel_drift_save_jacobian', type=str2bool, default=False, help='Also save projected Jacobian rows; can be very large')
+    parser.add_argument('--kernel_drift_save_projections', type=str2bool, default=True, help='Save projected outputs/targets/residuals at each snapshot')
+    parser.add_argument('--kernel_drift_denormalize_output', type=str2bool, default=False, help='Measure kernels of decoded physical outputs instead of normalized model outputs')
+    parser.add_argument('--kernel_drift_seed', type=nullable_int, default=None, help='Seed for probe-index and random-projection selection')
+
     parser.add_argument('--eval_grad_every', type=nullable_int, default=None, help='evaluate grad every N epochs')
     parser.add_argument('--eval_grad_rand', type=str2bool, default=False, help='use random sampling during gradient analysis')
     parser.add_argument('--eval_grad_mode', type=str, default='raw', choices=['raw', 'scaled'], help='Gradient analysis mode')
@@ -328,6 +347,8 @@ def get_config() -> Dict[str, Any]:
         'c2f_res_per_phase',
         'subset_size_per_phase',
         'batch_size_per_phase',
+        'kernel_drift_epochs',
+        'kernel_drift_probe_indices',
     ]
     for arg in int_list_args:
         if arg in config and config[arg] is not None:
