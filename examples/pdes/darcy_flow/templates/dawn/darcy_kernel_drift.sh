@@ -74,6 +74,8 @@ FNO_WIDTH="${FNO_WIDTH:-32}"
 FNO_MODES="${FNO_MODES:-8}"
 ADD_COORDS="${ADD_COORDS:-1}"
 LOSS_REDUCTION="${LOSS_REDUCTION:-sum}"
+NORMALIZE_INPUT="${NORMALIZE_INPUT:-0}"
+NORMALIZE_OUTPUT="${NORMALIZE_OUTPUT:-1}"
 LOAD_GPU="${LOAD_GPU:-1}"
 SPECTRAL="${SPECTRAL:-0}"
 
@@ -100,6 +102,7 @@ unset PYTHONHOME
 echo "Using PYTHON=${PYTHON}"
 echo "Using DEVICE=${DEVICE}"
 echo "Using RUN=${RUN}"
+echo "Using normalization: input=${NORMALIZE_INPUT} output=${NORMALIZE_OUTPUT}"
 echo "Using probe: split=${PROBE_SPLIT} res=${PROBE_RES:-auto} samples=${PROBE_SAMPLES} projections=${N_PROJECTIONS}"
 echo "Kernel epochs: ${KERNEL_EPOCHS_JSON}"
 
@@ -150,7 +153,24 @@ case "$RUN" in
         ;;
 esac
 
-OUT_DIR="${OUT_DIR:-${OUT_BASE}/${NAME}_seed${SEED}_n${PROBE_SAMPLES}_p${N_PROJECTIONS}}"
+case "$NORMALIZE_INPUT" in
+    1|true|TRUE|True|yes|YES|Yes|y|Y) NORM_INPUT_TAG="innorm" ;;
+    0|false|FALSE|False|no|NO|No|n|N) NORM_INPUT_TAG="inraw" ;;
+    *)
+        echo "ERROR: NORMALIZE_INPUT must be boolean-like, got ${NORMALIZE_INPUT}."
+        exit 2
+        ;;
+esac
+case "$NORMALIZE_OUTPUT" in
+    1|true|TRUE|True|yes|YES|Yes|y|Y) NORM_OUTPUT_TAG="outnorm" ;;
+    0|false|FALSE|False|no|NO|No|n|N) NORM_OUTPUT_TAG="outraw" ;;
+    *)
+        echo "ERROR: NORMALIZE_OUTPUT must be boolean-like, got ${NORMALIZE_OUTPUT}."
+        exit 2
+        ;;
+esac
+NORM_TAG="${NORM_TAG:-${NORM_INPUT_TAG}_${NORM_OUTPUT_TAG}}"
+OUT_DIR="${OUT_DIR:-${OUT_BASE}/${NAME}_${NORM_TAG}_seed${SEED}_n${PROBE_SAMPLES}_p${N_PROJECTIONS}}"
 
 args=(
     "$PYTHON" examples/pdes/darcy_flow/runners/run_experiment.py
@@ -166,6 +186,9 @@ args=(
     --loss_reduction "$LOSS_REDUCTION"
     --fno_width "$FNO_WIDTH"
     --fno_modes "$FNO_MODES"
+    --normalize true
+    --normalize_input "$NORMALIZE_INPUT"
+    --normalize_output "$NORMALIZE_OUTPUT"
     --epochs_per_phase_json "$EPOCHS_JSON"
     --c2f_res_per_phase_json "$RES_JSON"
     --subset_size_per_phase_json "$SUBSET_JSON"
