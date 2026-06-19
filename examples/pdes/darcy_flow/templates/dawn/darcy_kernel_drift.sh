@@ -104,6 +104,16 @@ echo "Using probe: split=${PROBE_SPLIT} res=${PROBE_RES:-auto} samples=${PROBE_S
 echo "Kernel epochs: ${KERNEL_EPOCHS_JSON}"
 
 case "$RUN" in
+    r15|baseline_r15)
+        NAME="baseline_r15_kernel_drift"
+        EPOCHS_JSON="${EPOCHS_JSON:-[500]}"
+        RES_JSON="[[15]]"
+        SUBSET_JSON="[[1024]]"
+        LEVELS_JSON="[1]"
+        BATCH_JSON="[[160]]"
+        LR_JSON="[${LR}]"
+        EVAL_EVERY="${EVAL_EVERY:-100}"
+        ;;
     r241|baseline_r241)
         NAME="baseline_r241_kernel_drift"
         EPOCHS_JSON="${EPOCHS_JSON:-[500]}"
@@ -135,7 +145,7 @@ case "$RUN" in
         EVAL_EVERY="${EVAL_EVERY:-160}"
         ;;
     *)
-        echo "ERROR: unknown RUN=${RUN}; use r241, r120, or ntk_500s."
+        echo "ERROR: unknown RUN=${RUN}; use r15, r241, r120, or ntk_500s."
         exit 2
         ;;
 esac
